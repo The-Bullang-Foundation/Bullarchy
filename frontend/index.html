@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bullarchy</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <canvas id="stars"></canvas>
+  <div class="nebula nebula-1"></div>
+  <div class="nebula nebula-2"></div>
+
+  <div id="app">
+    <header>
+      <pre class="logo-ascii">  ____        _ _               _
+ |  _ \      | | |             | |
+ | |_) |_   _| | | __ _ _ __ ___| |__  _   _
+ |  _ &lt;| | | | | |/ _` | '__/ __| '_ \| | | |
+ | |_) | |_| | | | (_| | | | (__| | | | |_| |
+ |____/ \__,_|_|_|\__,_|_|  \___|_| |_|\__, |
+                                        __/ |
+                                       |___/ </pre>
+      <span class="tagline">Bullang project toolchain — graphical interface</span>
+      <span class="version-badge">v1.0.0 — server running</span>
+    </header>
+
+    <div class="nav-divider"></div>
+
+    <!-- Top row: 3 cards -->
+    <div class="command-grid top-row">
+      <div class="cmd-card" data-cmd="init">
+        <span class="card-icon">🏗️</span>
+        <div class="card-title">init</div>
+        <div class="card-desc">Scaffold a new Bullang project with depth-based or blueprint structure.</div>
+      </div>
+      <div class="cmd-card" data-cmd="convert">
+        <span class="card-icon">⚡</span>
+        <div class="card-title">convert</div>
+        <div class="card-desc">Transpile a <code>.bu</code> project or single file to Rust, Python, C, C++, or Go.</div>
+      </div>
+      <div class="cmd-card" data-cmd="blueprint">
+        <span class="card-icon">🗺️</span>
+        <div class="card-title">blueprint</div>
+        <div class="card-desc">Design and save a <code>blueprint.bu</code> file in an interactive visual editor.</div>
+      </div>
+    </div>
+
+    <!-- Bottom row: 2 cards centred -->
+    <div class="command-grid bottom-row">
+      <div class="cmd-card" data-cmd="control">
+        <span class="card-icon">🔧</span>
+        <div class="card-title">control</div>
+        <div class="card-desc">Run <strong>check</strong> to validate your project, or <strong>fmt</strong> to reformat all <code>.bu</code> files.</div>
+      </div>
+      <div class="cmd-card" data-cmd="options">
+        <span class="card-icon">⚙️</span>
+        <div class="card-title">options</div>
+        <div class="card-desc">Configure your <strong>editor LSP</strong> setup, or <strong>update</strong> Bullarchy to the latest release.</div>
+      </div>
+    </div>
+
+    <div class="panel-wrap" id="panel-wrap"></div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
