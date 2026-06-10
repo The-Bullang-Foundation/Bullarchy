@@ -786,12 +786,18 @@ function bpRenderNode(node) {
   wrap.appendChild(card);
 
   if (node.kind === 'folder') {
-    const addBtn = document.createElement('button');
-    addBtn.className = 'bp-add-child';
-    addBtn.textContent = '+';
-    addBtn.title = 'Add child';
-    addBtn.addEventListener('click', (e) => { e.stopPropagation(); bpOpenAddChild(node, addBtn); });
-    wrap.appendChild(addBtn);
+    const childFolders = node.children.filter(c => c.kind === 'folder').length;
+    const childFiles   = node.children.filter(c => c.kind === 'file').length;
+    const canFolder    = childFolders < 5;
+    const canFile      = childFiles   < 5;
+    if (canFolder || canFile) {
+      const addBtn = document.createElement('button');
+      addBtn.className = 'bp-add-child';
+      addBtn.textContent = '+';
+      addBtn.title = 'Add child';
+      addBtn.addEventListener('click', (e) => { e.stopPropagation(); bpOpenAddChild(node, addBtn, canFolder, canFile); });
+      wrap.appendChild(addBtn);
+    }
   }
 
   return wrap;
@@ -895,7 +901,7 @@ function bpPositionPopover(pop, anchor) {
   pop.style.visibility = 'visible';
 }
 
-function bpOpenAddChild(parentNode, anchor) {
+function bpOpenAddChild(parentNode, anchor, canFolder = true, canFile = true) {
   bpClosePopover();
   bpActiveId = `add-${parentNode.id}`;
 
@@ -910,26 +916,30 @@ function bpOpenAddChild(parentNode, anchor) {
   const choices = document.createElement('div');
   choices.className = 'bp-pop-choices';
 
-  const folderBtn = document.createElement('button');
-  folderBtn.className = 'bp-pop-choice';
-  folderBtn.innerHTML = '📁<span>Folder</span>';
-  folderBtn.addEventListener('click', () => {
-    parentNode.children.push(bpNewFolder());
-    bpClosePopover();
-    bpRenderTree();
-  });
+  if (canFolder) {
+    const folderBtn = document.createElement('button');
+    folderBtn.className = 'bp-pop-choice';
+    folderBtn.innerHTML = '📁<span>Folder</span>';
+    folderBtn.addEventListener('click', () => {
+      parentNode.children.push(bpNewFolder());
+      bpClosePopover();
+      bpRenderTree();
+    });
+    choices.appendChild(folderBtn);
+  }
 
-  const fileBtn = document.createElement('button');
-  fileBtn.className = 'bp-pop-choice';
-  fileBtn.innerHTML = '📄<span>File</span>';
-  fileBtn.addEventListener('click', () => {
-    parentNode.children.push(bpNewFile());
-    bpClosePopover();
-    bpRenderTree();
-  });
+  if (canFile) {
+    const fileBtn = document.createElement('button');
+    fileBtn.className = 'bp-pop-choice';
+    fileBtn.innerHTML = '📄<span>File</span>';
+    fileBtn.addEventListener('click', () => {
+      parentNode.children.push(bpNewFile());
+      bpClosePopover();
+      bpRenderTree();
+    });
+    choices.appendChild(fileBtn);
+  }
 
-  choices.appendChild(folderBtn);
-  choices.appendChild(fileBtn);
   pop.appendChild(choices);
   bpPositionPopover(pop, anchor);
   bpPopover = pop;
