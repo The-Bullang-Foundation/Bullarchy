@@ -19,7 +19,6 @@ const PORT: u16 = 7474;
 const INDEX_HTML: &str  = include_str!("../frontend/index.html");
 const APP_JS: &str      = include_str!("../frontend/app.js");
 const STYLE_CSS: &str      = include_str!("../frontend/style.css");
-const BLUEPRINT_JS: &str   = include_str!("../frontend/blueprint.js");
 
 #[tokio::main]
 async fn main() {
@@ -31,7 +30,6 @@ async fn main() {
     let app = Router::new()
         .route("/",            get(serve_index))
         .route("/app.js",        get(serve_js))
-        .route("/blueprint.js",  get(serve_blueprint_js))
         .route("/style.css",   get(serve_css))
         .route("/api/init",    post(routes::handle_init))
         .route("/api/convert", post(routes::handle_convert))
@@ -68,13 +66,6 @@ async fn serve_js() -> impl axum::response::IntoResponse {
     (
         [(axum::http::header::CONTENT_TYPE, "application/javascript")],
         APP_JS,
-    )
-}
-
-async fn serve_blueprint_js() -> impl axum::response::IntoResponse {
-    (
-        [(axum::http::header::CONTENT_TYPE, "application/javascript")],
-        BLUEPRINT_JS,
     )
 }
 

@@ -562,10 +562,462 @@ function buildUpdateSubPanel() {
   return wrap;
 }
 
+// ── Blueprint state ──────────────────────────────────────────────────────────
+
+const BP_LANGS = ['', 'rs', 'py', 'c', 'cpp', 'go'];
+const BP_RANKS = ['skirmish','tactic','strategy','battle','theater','war'];
+
+let bpTree      = null;
+let bpNextId    = 1;
+let bpPopover   = null;
+let bpActiveId  = null;
+let bpRenderRoot = null;
+let bpCanvasEl   = null;
+
+function bpNewFolder(name = 'folder', lang = '', owner = '') {
+  return { id: bpNextId++, kind: 'folder', name, lang, owner, children: [] };
+}
+
+function bpNewFile(name = 'file', fns = [], owner = '') {
+  return { id: bpNextId++, kind: 'file', name, fns, owner };
+}
+
+function bpRemoveNode(parent, id) {
+  if (parent.kind !== 'folder') return false;
+  const idx = parent.children.findIndex(c => c.id === id);
+  if (idx !== -1) { parent.children.splice(idx, 1); return true; }
+  for (const c of parent.children) { if (bpRemoveNode(c, id)) return true; }
+  return false;
+}
+
+function bpDepthOf(node, target, d = 0) {
+  if (node.id === target) return d;
+  if (node.kind === 'folder') {
+    for (const c of node.children) {
+      const r = bpDepthOf(c, target, d + 1);
+      if (r !== -1) return r;
+    }
+  }
+  return -1;
+}
+
+function bpSerialize(node, indent = 0) {
+  const pad  = '    '.repeat(indent);
+  const pad1 = '    '.repeat(indent + 1);
+  if (node.kind === 'file') {
+    const fns  = node.fns.length ? node.fns.join(', ') : '';
+    const stub = fns ? `: ${fns}` : ': _';
+    if (node.owner)
+      return `${pad}${node.name}.bu ${stub} {\n${pad1}owner : "${node.owner}"\n${pad}}\n`;
+    return `${pad}${node.name}.bu ${stub};\n`;
+  }
+  const langPrefix = node.lang ? `${node.lang}: ` : '';
+  const depth      = bpTree ? bpDepthOf(bpTree, node.id) : 0;
+  const rank       = BP_RANKS[Math.min(depth, BP_RANKS.length - 1)];
+  const header     = `${pad}${langPrefix}${rank} ${node.name}`;
+  if (!node.children.length) return `${header} {}\n`;
+  const inner     = node.children.map(c => bpSerialize(c, indent + 1)).join('');
+  const ownerLine = node.owner ? `${pad1}// owner: ${node.owner}\n` : '';
+  return `${header} {\n${ownerLine}${inner}${pad}}\n`;
+}
+
+function bpGenerateBu() {
+  if (!bpTree) return '';
+  return bpSerialize(bpTree, 0);
+}
+
+function bpSetStatus(el, msg, ok) {
+  el.textContent = msg;
+  el.className   = `bp-status ${ok ? 'ok' : 'err'}`;
+}
+
+function bpReset() {
+  bpTree       = null;
+  bpNextId     = 1;
+  bpPopover    = null;
+  bpActiveId   = null;
+  bpRenderRoot = null;
+  bpCanvasEl   = null;
+}
+
+function bpMountInto(container) {
+  bpReset();
+  container.innerHTML = '';
+
+  const toolbar    = document.createElement('div');
+  toolbar.className = 'bp-toolbar';
+  const savePathIn  = document.createElement('input');
+  savePathIn.className = 'bp-save-path';
+  savePathIn.type  = 'text';
+  savePathIn.placeholder = '/home/user/project/blueprint.bu';
+  const saveBtn    = document.createElement('button');
+  saveBtn.className = 'btn-save-bp';
+  saveBtn.textContent = 'Save blueprint';
+  const statusEl   = document.createElement('span');
+  statusEl.className = 'bp-status';
+  toolbar.appendChild(savePathIn);
+  toolbar.appendChild(saveBtn);
+  toolbar.appendChild(statusEl);
+  container.appendChild(toolbar);
+
+  const stage      = document.createElement('div');
+  stage.className  = 'bp-stage';
+  bpCanvasEl       = document.createElement('canvas');
+  bpCanvasEl.className = 'bp-canvas';
+  stage.appendChild(bpCanvasEl);
+  bpRenderRoot     = document.createElement('div');
+  bpRenderRoot.className = 'bp-pyramid';
+  stage.appendChild(bpRenderRoot);
+  container.appendChild(stage);
+
+  bpRenderEmpty();
+
+  document.addEventListener('pointerdown', bpOnOutsideClick, { capture: true });
+
+  saveBtn.addEventListener('click', async () => {
+    const path = savePathIn.value.trim();
+    if (!path)       { bpSetStatus(statusEl, 'Enter a save path first.', false); return; }
+    const content = bpGenerateBu();
+    if (!content)    { bpSetStatus(statusEl, 'Nothing to save.', false); return; }
+    saveBtn.disabled = true;
+    try {
+      const res  = await fetch('/api/blueprint/save', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, content }),
+      });
+      const data = await res.json();
+      bpSetStatus(statusEl, data.ok ? `Saved to ${path}` : (data.error || 'Save failed.'), data.ok);
+    } catch (e) {
+      bpSetStatus(statusEl, `Network error: ${e.message}`, false);
+    } finally { saveBtn.disabled = false; }
+  });
+}
+
+function bpRenderEmpty() {
+  bpRenderRoot.innerHTML = '';
+  const wrap = document.createElement('div');
+  wrap.className = 'bp-empty';
+  const txt = document.createElement('div');
+  txt.className = 'bp-empty-text';
+  txt.textContent = 'Start your blueprint by creating the root folder.';
+  const addBtn = document.createElement('button');
+  addBtn.className = 'bp-add-root';
+  addBtn.textContent = '+ Create root folder';
+  addBtn.addEventListener('click', () => { bpTree = bpNewFolder('root'); bpRenderTree(); });
+  wrap.appendChild(txt);
+  wrap.appendChild(addBtn);
+  bpRenderRoot.appendChild(wrap);
+}
+
+function bpRenderTree() {
+  if (!bpRenderRoot) return;
+  bpClosePopover();
+  bpRenderRoot.innerHTML = '';
+
+  const levels = [];
+  let current  = [{ node: bpTree, parentId: null }];
+  while (current.length) {
+    levels.push(current);
+    const next = [];
+    for (const { node } of current) {
+      if (node.kind === 'folder') {
+        for (const c of node.children) next.push({ node: c, parentId: node.id });
+      }
+    }
+    current = next;
+  }
+
+  const nodeEls = {};
+  for (const level of levels) {
+    const row = document.createElement('div');
+    row.className = 'bp-row';
+    for (const { node } of level) {
+      const el = bpRenderNode(node);
+      nodeEls[node.id] = el;
+      row.appendChild(el);
+    }
+    bpRenderRoot.appendChild(row);
+  }
+
+  requestAnimationFrame(() => bpDrawConnectors(levels, nodeEls));
+}
+
+function bpRenderNode(node) {
+  const wrap = document.createElement('div');
+  wrap.className = `bp-node bp-node-${node.kind}`;
+  wrap.dataset.id = node.id;
+
+  const card = document.createElement('div');
+  card.className = 'bp-card';
+  card.addEventListener('click', (e) => { e.stopPropagation(); bpOpenPopover(node, card); });
+
+  const icon = document.createElement('span');
+  icon.className = 'bp-node-icon';
+  icon.textContent = node.kind === 'folder' ? '📁' : '📄';
+
+  const nameEl = document.createElement('span');
+  nameEl.className = 'bp-node-name';
+  nameEl.textContent = node.kind === 'folder'
+    ? node.name + (node.lang ? `  [${node.lang}]` : '')
+    : node.name + '.bu';
+
+  card.appendChild(icon);
+  card.appendChild(nameEl);
+
+  if (node.kind === 'file' && node.fns.length) {
+    const fnsEl = document.createElement('div');
+    fnsEl.className = 'bp-node-fns';
+    fnsEl.textContent = node.fns.join(', ');
+    card.appendChild(fnsEl);
+  }
+
+  if (node.owner) {
+    const ownerEl = document.createElement('div');
+    ownerEl.className = 'bp-node-owner';
+    ownerEl.textContent = `@${node.owner}`;
+    card.appendChild(ownerEl);
+  }
+
+  wrap.appendChild(card);
+
+  if (node.kind === 'folder') {
+    const addBtn = document.createElement('button');
+    addBtn.className = 'bp-add-child';
+    addBtn.textContent = '+';
+    addBtn.title = 'Add child';
+    addBtn.addEventListener('click', (e) => { e.stopPropagation(); bpOpenAddChild(node, addBtn); });
+    wrap.appendChild(addBtn);
+  }
+
+  return wrap;
+}
+
+function bpOpenPopover(node, anchor) {
+  if (bpActiveId === node.id) { bpClosePopover(); return; }
+  bpClosePopover();
+  bpActiveId = node.id;
+  anchor.classList.add('bp-card-active');
+
+  const pop = document.createElement('div');
+  pop.className = 'bp-popover';
+
+  const title = document.createElement('div');
+  title.className = 'bp-pop-title';
+  title.textContent = node.kind === 'folder' ? 'Edit folder' : 'Edit file';
+  pop.appendChild(title);
+
+  pop.appendChild(bpPopField('Name', node.name, (v) => { node.name = v; bpRefreshNode(node); }));
+
+  if (node.kind === 'folder') {
+    const lg  = document.createElement('div');
+    lg.className = 'bp-pop-field';
+    const ll  = document.createElement('label');
+    ll.textContent = 'Language';
+    const sel = document.createElement('select');
+    sel.className = 'bp-pop-select';
+    BP_LANGS.forEach(l => {
+      const o = document.createElement('option');
+      o.value = l; o.textContent = l || 'auto';
+      if (l === node.lang) o.selected = true;
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', () => { node.lang = sel.value; bpRefreshNode(node); });
+    lg.appendChild(ll); lg.appendChild(sel);
+    pop.appendChild(lg);
+  }
+
+  if (node.kind === 'file') {
+    const fw  = document.createElement('div');
+    fw.className = 'bp-pop-field';
+    const fl  = document.createElement('label');
+    fl.textContent = 'Functions';
+    const fi  = document.createElement('input');
+    fi.className = 'bp-pop-input'; fi.type = 'text';
+    fi.placeholder = 'fn1, fn2, fn3';
+    fi.value = node.fns.join(', ');
+    fi.addEventListener('input', () => {
+      node.fns = fi.value.split(',').map(s => s.trim()).filter(Boolean);
+      bpRefreshNode(node);
+    });
+    fw.appendChild(fl); fw.appendChild(fi);
+    pop.appendChild(fw);
+  }
+
+  pop.appendChild(bpPopField('Owner (optional)', node.owner || '', (v) => { node.owner = v; bpRefreshNode(node); }));
+
+  if (node !== bpTree) {
+    const del = document.createElement('button');
+    del.className = 'bp-pop-delete';
+    del.textContent = 'Delete node';
+    del.addEventListener('click', () => {
+      bpRemoveNode(bpTree, node.id);
+      bpClosePopover();
+      bpRenderTree();
+    });
+    pop.appendChild(del);
+  }
+
+  bpPositionPopover(pop, anchor);
+  bpPopover = pop;
+}
+
+function bpPopField(label, value, onChange) {
+  const wrap = document.createElement('div');
+  wrap.className = 'bp-pop-field';
+  const lbl = document.createElement('label');
+  lbl.textContent = label;
+  const inp = document.createElement('input');
+  inp.className = 'bp-pop-input'; inp.type = 'text'; inp.value = value;
+  inp.addEventListener('input', () => onChange(inp.value.trim()));
+  wrap.appendChild(lbl); wrap.appendChild(inp);
+  return wrap;
+}
+
+function bpPositionPopover(pop, anchor) {
+  pop.style.cssText = 'position:fixed;visibility:hidden;';
+  document.body.appendChild(pop);
+  const rect = anchor.getBoundingClientRect();
+  const pw   = pop.offsetWidth  || 220;
+  const ph   = pop.offsetHeight || 200;
+  const gap  = 10;
+  let left   = rect.right + gap;
+  let top    = rect.top;
+  if (left + pw > window.innerWidth  - gap) left = rect.left - pw - gap;
+  if (top  + ph > window.innerHeight - gap) top  = window.innerHeight - ph - gap;
+  if (top < gap) top = gap;
+  pop.style.left = `${left}px`;
+  pop.style.top  = `${top}px`;
+  pop.style.visibility = 'visible';
+}
+
+function bpOpenAddChild(parentNode, anchor) {
+  bpClosePopover();
+  bpActiveId = `add-${parentNode.id}`;
+
+  const pop = document.createElement('div');
+  pop.className = 'bp-popover';
+
+  const title = document.createElement('div');
+  title.className = 'bp-pop-title';
+  title.textContent = 'Add child';
+  pop.appendChild(title);
+
+  const choices = document.createElement('div');
+  choices.className = 'bp-pop-choices';
+
+  const folderBtn = document.createElement('button');
+  folderBtn.className = 'bp-pop-choice';
+  folderBtn.innerHTML = '📁<span>Folder</span>';
+  folderBtn.addEventListener('click', () => {
+    parentNode.children.push(bpNewFolder());
+    bpClosePopover();
+    bpRenderTree();
+  });
+
+  const fileBtn = document.createElement('button');
+  fileBtn.className = 'bp-pop-choice';
+  fileBtn.innerHTML = '📄<span>File</span>';
+  fileBtn.addEventListener('click', () => {
+    parentNode.children.push(bpNewFile());
+    bpClosePopover();
+    bpRenderTree();
+  });
+
+  choices.appendChild(folderBtn);
+  choices.appendChild(fileBtn);
+  pop.appendChild(choices);
+  bpPositionPopover(pop, anchor);
+  bpPopover = pop;
+}
+
+function bpClosePopover() {
+  if (bpPopover) { bpPopover.remove(); bpPopover = null; }
+  bpActiveId = null;
+  document.querySelectorAll('.bp-card-active').forEach(el => el.classList.remove('bp-card-active'));
+}
+
+function bpOnOutsideClick(e) {
+  if (!bpPopover) return;
+  if (!bpPopover.contains(e.target) && !e.target.closest('.bp-card') && !e.target.closest('.bp-add-child'))
+    bpClosePopover();
+}
+
+function bpRefreshNode(node) {
+  const el      = document.querySelector(`.bp-node[data-id="${node.id}"] .bp-card`);
+  if (!el) return;
+  const nameEl  = el.querySelector('.bp-node-name');
+  const fnsEl   = el.querySelector('.bp-node-fns');
+  const ownerEl = el.querySelector('.bp-node-owner');
+  if (nameEl) nameEl.textContent = node.kind === 'folder'
+    ? node.name + (node.lang ? `  [${node.lang}]` : '')
+    : node.name + '.bu';
+  if (node.kind === 'file') {
+    if (node.fns.length) {
+      if (fnsEl) { fnsEl.textContent = node.fns.join(', '); }
+      else { const f = document.createElement('div'); f.className = 'bp-node-fns'; f.textContent = node.fns.join(', '); el.appendChild(f); }
+    } else if (fnsEl) fnsEl.remove();
+  }
+  if (node.owner) {
+    if (ownerEl) { ownerEl.textContent = `@${node.owner}`; }
+    else { const o = document.createElement('div'); o.className = 'bp-node-owner'; o.textContent = `@${node.owner}`; el.appendChild(o); }
+  } else if (ownerEl) ownerEl.remove();
+}
+
+function bpDrawConnectors(levels, nodeEls) {
+  if (!bpCanvasEl || !bpRenderRoot) return;
+  const stageRect    = bpRenderRoot.closest('.bp-stage').getBoundingClientRect();
+  bpCanvasEl.width   = stageRect.width;
+  bpCanvasEl.height  = stageRect.height;
+  const ctx          = bpCanvasEl.getContext('2d');
+  ctx.clearRect(0, 0, bpCanvasEl.width, bpCanvasEl.height);
+  ctx.strokeStyle    = 'rgba(74, 158, 255, 0.35)';
+  ctx.lineWidth      = 1.5;
+  ctx.setLineDash([4, 4]);
+
+  for (let li = 0; li < levels.length - 1; li++) {
+    for (const { node } of levels[li]) {
+      if (node.kind !== 'folder') continue;
+      const pEl   = nodeEls[node.id];
+      if (!pEl) continue;
+      const pRect = pEl.getBoundingClientRect();
+      const px    = pRect.left + pRect.width / 2 - stageRect.left;
+      const py    = pRect.bottom - stageRect.top;
+      for (const child of node.children) {
+        const cEl   = nodeEls[child.id];
+        if (!cEl) continue;
+        const cRect = cEl.getBoundingClientRect();
+        const cx    = cRect.left + cRect.width / 2 - stageRect.left;
+        const cy    = cRect.top - stageRect.top;
+        ctx.beginPath();
+        ctx.moveTo(px, py);
+        ctx.bezierCurveTo(px, py + (cy - py) * 0.5, cx, py + (cy - py) * 0.5, cx, cy);
+        ctx.stroke();
+      }
+    }
+  }
+}
+
+window.addEventListener('resize', () => {
+  if (!bpTree || !bpRenderRoot) return;
+  const levels  = [];
+  let current   = [{ node: bpTree }];
+  const nodeEls = {};
+  while (current.length) {
+    levels.push(current);
+    const next = [];
+    for (const { node } of current) {
+      const el = document.querySelector(`.bp-node[data-id="${node.id}"]`);
+      if (el) nodeEls[node.id] = el;
+      if (node.kind === 'folder') for (const c of node.children) next.push({ node: c });
+    }
+    current = next;
+  }
+  requestAnimationFrame(() => bpDrawConnectors(levels, nodeEls));
+});
+
 // ── blueprint panel ───────────────────────────────────────────────────────────
 
 function buildBlueprintPanel() {
-  // Delegate to blueprint.js module — mounted into panel body
   const frag = document.createDocumentFragment();
 
   const hint = infoBanner(
@@ -573,333 +1025,14 @@ function buildBlueprintPanel() {
   );
   frag.appendChild(hint);
 
-  const editorMount = document.createElement('div');
-  editorMount.className = 'bp-editor-mount';
-  frag.appendChild(editorMount);
+  const mount = document.createElement('div');
+  mount.className = 'bp-editor-mount';
+  frag.appendChild(mount);
 
   const panel = makePanel('blueprint — visual editor', '🗺️', frag);
 
-  // Mount after panel is in DOM
-  requestAnimationFrame(() => {
-    import('/blueprint.js').then(m => m.mountBlueprint(editorMount));
-  });
+  // Mount after panel is inserted into the DOM
+  requestAnimationFrame(() => bpMountInto(mount));
 
   return panel;
-}
-
-function buildBlueprintPanel_UNUSED() {
-  const frag = document.createDocumentFragment();
-
-  const hintBanner = infoBanner(
-    'Write your blueprint.bu in the editor on the left. The tree preview on the right updates as you type. Save to any path on disk when ready.'
-  );
-  frag.appendChild(hintBanner);
-
-  // Editor / preview split
-  const editor = document.createElement('div');
-  editor.className = 'blueprint-editor';
-
-  // ── Left pane: textarea ──────────────────────────────────────────────────
-  const leftPane = document.createElement('div');
-  leftPane.className = 'bp-pane bp-editor-pane';
-
-  const leftHeader = document.createElement('div');
-  leftHeader.className = 'bp-pane-header';
-  leftHeader.innerHTML = '<span>blueprint.bu</span><span id="bp-parse-status"></span>';
-
-  const textarea = document.createElement('textarea');
-  textarea.className = 'bp-textarea';
-  textarea.spellcheck = false;
-  textarea.value = BLUEPRINT_PLACEHOLDER;
-
-  leftPane.appendChild(leftHeader);
-  leftPane.appendChild(textarea);
-
-  // ── Right pane: live tree ────────────────────────────────────────────────
-  const rightPane = document.createElement('div');
-  rightPane.className = 'bp-pane';
-
-  const rightHeader = document.createElement('div');
-  rightHeader.className = 'bp-pane-header';
-  rightHeader.innerHTML = '<span>Preview</span>';
-
-  const preview = document.createElement('div');
-  preview.className = 'bp-preview';
-
-  rightPane.appendChild(rightHeader);
-  rightPane.appendChild(preview);
-
-  editor.appendChild(leftPane);
-  editor.appendChild(rightPane);
-  frag.appendChild(editor);
-
-  // ── Save bar ──────────────────────────────────────────────────────────────
-  const actionsBar = document.createElement('div');
-  actionsBar.className = 'bp-actions';
-
-  const pathIn = document.createElement('input');
-  pathIn.className = 'bp-save-path';
-  pathIn.type = 'text';
-  pathIn.placeholder = '/home/user/projects/my_project/blueprint.bu';
-
-  const saveBtn = document.createElement('button');
-  saveBtn.className = 'btn-save-bp';
-  saveBtn.textContent = 'Save blueprint';
-
-  const statusEl = document.createElement('span');
-  statusEl.className = 'bp-status';
-
-  actionsBar.appendChild(pathIn);
-  actionsBar.appendChild(saveBtn);
-  actionsBar.appendChild(statusEl);
-  frag.appendChild(actionsBar);
-
-  // ── Live preview logic ───────────────────────────────────────────────────
-  const parseStatusEl = leftHeader.querySelector('#bp-parse-status');
-
-  function refreshPreview() {
-    const src = textarea.value;
-    try {
-      const nodes = parseBlueprint(src);
-      preview.innerHTML = '';
-      if (nodes.length === 0) {
-        const empty = document.createElement('div');
-        empty.className = 'bp-tree-empty';
-        empty.textContent = 'Nothing to show yet.';
-        preview.appendChild(empty);
-      } else {
-        renderTree(nodes, preview, 0);
-      }
-      parseStatusEl.textContent = '✓ valid';
-      parseStatusEl.style.color = 'var(--ok-green)';
-    } catch (e) {
-      preview.innerHTML = `<div class="bp-tree-error">${escHtml(e.message)}</div>`;
-      parseStatusEl.textContent = '✗ error';
-      parseStatusEl.style.color = 'var(--err-red)';
-    }
-  }
-
-  textarea.addEventListener('input', refreshPreview);
-  refreshPreview();
-
-  // ── Save logic ───────────────────────────────────────────────────────────
-  saveBtn.addEventListener('click', async () => {
-    const savePath = pathIn.value.trim();
-    if (!savePath) {
-      statusEl.textContent = 'Enter a save path first.';
-      statusEl.className = 'bp-status err';
-      return;
-    }
-    saveBtn.disabled = true;
-    statusEl.textContent = 'Saving…';
-    statusEl.className = 'bp-status';
-
-    try {
-      const res  = await fetch('/api/blueprint/save', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ path: savePath, content: textarea.value }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        statusEl.textContent = `Saved to ${savePath}`;
-        statusEl.className = 'bp-status ok';
-      } else {
-        statusEl.textContent = data.error || 'Save failed.';
-        statusEl.className = 'bp-status err';
-      }
-    } catch (e) {
-      statusEl.textContent = `Network error: ${e.message}`;
-      statusEl.className = 'bp-status err';
-    } finally {
-      saveBtn.disabled = false;
-    }
-  });
-
-  return makePanel('blueprint — visual editor', '🗺️', frag);
-}
-
-// ── Blueprint client-side parser ──────────────────────────────────────────────
-// Mirrors the Rust parser logic closely enough to give live feedback.
-
-function parseBlueprint(src) {
-  const lines = src.split('\n');
-  const unit  = detectIndentUnit(lines);
-  const [nodes] = parseBlock(lines, 0, 0, unit);
-  return nodes;
-}
-
-function detectIndentUnit(lines) {
-  for (const line of lines) {
-    const t = line.trim();
-    if (!t || t.startsWith('//')) continue;
-    const spaces = line.length - line.trimStart().length;
-    if (spaces > 0) return spaces;
-  }
-  return 4;
-}
-
-function parseBlock(lines, start, baseIndent, unit) {
-  const nodes = [];
-  let i = start;
-
-  while (i < lines.length) {
-    const line    = lines[i];
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('//')) { i++; continue; }
-
-    const indent = line.length - line.trimStart().length;
-    if (indent < baseIndent) break;
-    if (trimmed === '}') { i++; continue; }
-
-    if (indent > baseIndent) {
-      throw new Error(`Line ${i+1}: unexpected indentation (expected ${baseIndent}, got ${indent})`);
-    }
-
-    if (isEntryLine(trimmed)) {
-      const { stem, fns, hasMeta } = parseEntryHeader(trimmed, i + 1);
-      i++;
-      let goal = null, owner = null;
-      if (hasMeta) {
-        const meta = parseMetaBlock(lines, i, baseIndent, unit, i);
-        goal = meta.goal; owner = meta.owner; i = meta.next;
-      }
-      nodes.push({ type: 'entry', name: stem, fns, goal, owner });
-    } else if (trimmed.endsWith('{') || trimmed.endsWith(':')) {
-      const { lang, name } = parseFolderHeader(trimmed);
-      if (!name) throw new Error(`Line ${i+1}: empty folder name`);
-      i++;
-      const [children, next] = parseBlock(lines, i, baseIndent + unit, unit);
-      nodes.push({ type: 'folder', name, lang, children });
-      i = next;
-    } else {
-      throw new Error(`Line ${i+1}: expected folder or file entry — got: "${trimmed}"`);
-    }
-  }
-
-  return [nodes, i];
-}
-
-function isEntryLine(t) {
-  const pos = t.indexOf('.bu');
-  return pos !== -1 && t.slice(pos + 3).trimStart().startsWith(':');
-}
-
-function parseEntryHeader(t, lineNo) {
-  const pos  = t.indexOf('.bu');
-  const stem = t.slice(0, pos).trim();
-  if (!stem) throw new Error(`Line ${lineNo}: empty file name`);
-  const after = t.slice(pos + 3).trimStart();
-  if (!after.startsWith(':')) throw new Error(`Line ${lineNo}: expected ':' after filename`);
-  const rest    = after.slice(1).trim();
-  const hasMeta = rest.endsWith('{');
-  const fnsRaw  = hasMeta ? rest.slice(0, -1).trim() : rest.replace(/;$/, '').trim();
-  const fns     = fnsRaw.split(',').map(s => s.trim()).filter(Boolean);
-  return { stem, fns, hasMeta };
-}
-
-function parseMetaBlock(lines, start, entryIndent, unit, entryLine) {
-  let goal = null, owner = null, i = start;
-  const fieldIndent = entryIndent + unit;
-
-  while (i < lines.length) {
-    const line    = lines[i];
-    const trimmed = line.trim();
-    if (!trimmed) { i++; continue; }
-    const indent = line.length - line.trimStart().length;
-
-    if (trimmed === '}' && indent === entryIndent) return { goal, owner, next: i + 1 };
-    if (indent === fieldIndent) {
-      const gv = extractQuotedField(trimmed, 'goal');
-      const ov = extractQuotedField(trimmed, 'owner');
-      if (gv !== null) goal  = gv;
-      if (ov !== null) owner = ov;
-    }
-    i++;
-  }
-  throw new Error(`Line ${entryLine}: metadata block was never closed`);
-}
-
-function extractQuotedField(t, key) {
-  if (!t.toLowerCase().startsWith(key)) return null;
-  const rest = t.slice(key.length).trimStart();
-  if (!rest.startsWith(':')) return null;
-  const val = rest.slice(1).trim().replace(/^"|"$/g, '');
-  return val || null;
-}
-
-const LANG_MAP = {
-  rust:'rs', rs:'rs', python:'py', py:'py',
-  c:'c', cpp:'cpp', 'c++':'cpp', go:'go', golang:'go',
-};
-const RANK_WORDS = new Set(['war','theater','battle','strategy','tactic','skirmish']);
-
-function parseFolderHeader(t) {
-  const stripped = t.replace(/\{$/, '').replace(/:$/, '').trim();
-  const colon    = stripped.indexOf(':');
-  if (colon !== -1) {
-    const prefix = stripped.slice(0, colon).trim().toLowerCase();
-    const rest   = stripped.slice(colon + 1).trim();
-    if (rest && LANG_MAP[prefix]) {
-      return { lang: LANG_MAP[prefix], name: stripRank(rest) };
-    }
-  }
-  return { lang: null, name: stripRank(stripped) };
-}
-
-function stripRank(s) {
-  const parts = s.trim().split(/\s+/);
-  if (parts.length > 1 && RANK_WORDS.has(parts[0].toLowerCase())) {
-    return parts.slice(1).join(' ');
-  }
-  return s.trim();
-}
-
-// ── Blueprint tree renderer ───────────────────────────────────────────────────
-
-function renderTree(nodes, container, depth) {
-  for (const node of nodes) {
-    if (node.type === 'folder') {
-      const el = document.createElement('div');
-      el.className = 'bp-tree-node';
-      el.style.paddingLeft = `${depth * 16}px`;
-      const folderEl = document.createElement('div');
-      folderEl.className = 'bp-tree-folder';
-      folderEl.textContent = node.name + (node.lang ? `  [${node.lang}]` : '');
-      el.appendChild(folderEl);
-      container.appendChild(el);
-      renderTree(node.children, container, depth + 1);
-
-    } else if (node.type === 'entry') {
-      const el = document.createElement('div');
-      el.className = 'bp-tree-node';
-      el.style.paddingLeft = `${depth * 16}px`;
-
-      const fileEl = document.createElement('div');
-      fileEl.className = 'bp-tree-file';
-      fileEl.textContent = `${node.name}.bu`;
-      el.appendChild(fileEl);
-
-      for (const fn of node.fns) {
-        const fnEl = document.createElement('div');
-        fnEl.className = 'bp-tree-fn';
-        fnEl.style.paddingLeft = `${depth * 16}px`;
-        fnEl.textContent = fn;
-        el.appendChild(fnEl);
-      }
-
-      if (node.goal) {
-        const goalEl = document.createElement('div');
-        goalEl.style.cssText = `padding-left:${depth * 16 + 16}px;font-size:10px;color:var(--text-dim);font-style:italic;`;
-        goalEl.textContent = `goal: "${node.goal}"`;
-        el.appendChild(goalEl);
-      }
-
-      container.appendChild(el);
-    }
-  }
-}
-
-function escHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
