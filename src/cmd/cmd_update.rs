@@ -25,7 +25,7 @@ pub fn cmd_update() {
         .status();
 
     match status {
-        Ok(s) if s.success() => println!("Update complete."),
+        Ok(s) if s.success() => println!("Update complete.\n\nRestart the server to apply the new version."),
         Ok(s)  => eprintln!("cargo install exited with {}.", s),
         Err(e) => eprintln!("Failed to run cargo: {}.", e),
     }
