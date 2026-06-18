@@ -57,7 +57,7 @@ pub fn cmd_convert(target: Option<PathBuf>, second: Option<String>) {
         let lang_override = second.map(|s| {
             if is_known_ext(&s) { s }
             else {
-                eprintln!("error: '{}' is not a recognised backend — use rs py c cpp go", s);
+                eprintln!("error: '{}' is not a recognised backend — use rs py c cpp go java", s);
                 std::process::exit(1);
             }
         });
@@ -136,12 +136,13 @@ fn cmd_convert_file(input: PathBuf, lang: String, explicit_out: Option<PathBuf>)
             check_escape_compat(sf, &backend, &input);
 
             let (content, ext) = match backend {
-                Backend::Rust        => (codegen::emit_bare_rs(sf),  "rs"),
-                Backend::Python      => (codegen::emit_bare_py(sf),  "py"),
-                Backend::C           => (codegen::emit_bare_c(sf),   "c"),
-                Backend::Cpp         => (codegen::emit_bare_cpp(sf), "cpp"),
-                Backend::Go          => (codegen::emit_bare_go(sf),  "go"),
-                Backend::Unknown(_)  => (codegen::emit_bare_rs(sf),  "rs"),
+                Backend::Rust        => (codegen::emit_bare_rs(sf),   "rs"),
+                Backend::Python      => (codegen::emit_bare_py(sf),   "py"),
+                Backend::C           => (codegen::emit_bare_c(sf),    "c"),
+                Backend::Cpp         => (codegen::emit_bare_cpp(sf),  "cpp"),
+                Backend::Go          => (codegen::emit_bare_go(sf),   "go"),
+                Backend::Java        => (codegen::emit_bare_java(sf), "java"),
+                Backend::Unknown(_)  => (codegen::emit_bare_rs(sf),   "rs"),
             };
             let out = out_path(ext);
             write_or_exit(&out, content);
@@ -209,7 +210,7 @@ fn cmd_convert_project(source_dir: PathBuf, lang_override: Option<String>) {
     });
 
     let backend = Backend::from_ext(&resolved_lang).unwrap_or_else(|| {
-        eprintln!("error: unknown backend '{}' — use rs py c cpp go", resolved_lang);
+        eprintln!("error: unknown backend '{}' — use rs py c cpp go java", resolved_lang);
         std::process::exit(1);
     });
 
@@ -271,6 +272,7 @@ fn print_next_steps(backend: &Backend, out_dir: &Path, crate_name: &str) {
         Backend::C      => println!("to compile:\n  cd {} && make", out_dir.display()),
         Backend::Cpp    => println!("to compile:\n  cd {} && make", out_dir.display()),
         Backend::Go     => println!("to run:\n  cd {} && go run .", out_dir.display()),
+        Backend::Java   => println!("to compile:\n  cd {} && javac *.java && java Main", out_dir.display()),
         Backend::Unknown(kw) => eprintln!("error: unknown backend '{}'", kw),
     }
 }

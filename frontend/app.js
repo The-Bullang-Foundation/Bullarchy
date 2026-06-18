@@ -62,7 +62,7 @@ const RANKS = {
 const RANK_NAMES   = ['skirmish','tactic','strategy','battle','theater','war'];
 const LANG_OPTIONS = [
   ['', 'auto (from #lang)'],
-  ['rs', 'Rust'], ['py', 'Python'], ['c', 'C'], ['cpp', 'C++'], ['go', 'Go'],
+  ['rs', 'Rust'], ['py', 'Python'], ['c', 'C'], ['cpp', 'C++'], ['go', 'Go'], ['java', 'Java'],
 ];
 
 const BLUEPRINT_PLACEHOLDER = `// Blueprint example — edit freely
@@ -569,7 +569,7 @@ function buildUpdateSubPanel() {
 
 // ── Blueprint state ──────────────────────────────────────────────────────────
 
-const BP_LANGS = ['', 'rs', 'py', 'c', 'cpp', 'go'];
+const BP_LANGS = ['', 'rs', 'py', 'c', 'cpp', 'go', 'java'];
 const BP_RANKS = ['skirmish','tactic','strategy','battle','theater','war'];
 
 let bpTree      = null;
