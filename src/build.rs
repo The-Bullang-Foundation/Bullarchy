@@ -25,7 +25,7 @@ pub fn build(root: &Path, out_dir: &Path, crate_name: &str, backend: &Backend) -
 
     let src_out = match backend {
         Backend::Python => out_dir.join(crate_name),
-        Backend::Go | Backend::C | Backend::Cpp => out_dir.to_path_buf(),
+        Backend::Go | Backend::C | Backend::Cpp | Backend::Java => out_dir.to_path_buf(),
         _ => out_dir.join("src"),
     };
     fs::create_dir_all(&src_out).expect("could not create out/src");
@@ -131,6 +131,16 @@ pub fn build(root: &Path, out_dir: &Path, crate_name: &str, backend: &Backend) -
                 );
             }
         }
+        Backend::Java => {
+            if !all_structs.is_empty() || !all_enums.is_empty() {
+                let types_class = codegen::to_pascal_case(crate_name);
+                write_file(
+                    &out_dir.join(format!("{}.java", types_class)),
+                    &codegen::emit_types_java(&types_class, &all_structs, &all_enums),
+                    &mut files_written,
+                );
+            }
+        }
         Backend::Unknown(_) => {}
     }
 
@@ -142,7 +152,7 @@ pub fn build(root: &Path, out_dir: &Path, crate_name: &str, backend: &Backend) -
         if let Ok(bp_content) = fs::read_to_string(&bp_src) {
             let out_path = match backend {
                 Backend::Python => out_dir.join(crate_name).join("blueprint.md"),
-                Backend::C | Backend::Cpp | Backend::Go => out_dir.join("blueprint.md"),
+                Backend::C | Backend::Cpp | Backend::Go | Backend::Java => out_dir.join("blueprint.md"),
                 _ => src_out.join("blueprint.md"),
             };
             write_file(&out_path, &bp_content, &mut files_written);
@@ -194,7 +204,7 @@ fn emit_folder(
         for subdir in collect_subdirs(src_dir) {
             let name = dir_name(&subdir);
             let child_out = match backend {
-                Backend::C | Backend::Cpp | Backend::Go => out_dir.to_path_buf(),
+                Backend::C | Backend::Cpp | Backend::Go | Backend::Java => out_dir.to_path_buf(),
                 _ => {
                     let co = out_dir.join(&name);
                     fs::create_dir_all(&co).ok();
@@ -202,7 +212,7 @@ fn emit_folder(
                 }
             };
             let (gc, fns) = emit_folder(&subdir, &child_out, backend, crate_name, has_main, enum_env, errors, written);
-            if !matches!(backend, Backend::C | Backend::Cpp | Backend::Go) {
+            if !matches!(backend, Backend::C | Backend::Cpp | Backend::Go | Backend::Java) {
                 emit_mod_file(&child_out, &gc, backend, written);
                 child_modules.push(name);
             } else {
@@ -246,6 +256,7 @@ fn emit_folder(
                 Backend::C           => codegen::emit_source_c(&sf, &header_name),
                 Backend::Cpp         => codegen::emit_source_cpp(&sf, &hpp_name),
                 Backend::Go          => codegen::emit_source_go(&sf, &go_pkg),
+                Backend::Java        => codegen::emit_source_java(&sf, &codegen::to_pascal_case(&entry.file)),
                 Backend::Unknown(_)  => continue,
             };
             write_file(&out_path, &content, written);
@@ -277,7 +288,7 @@ fn emit_mod_file(dir: &Path, child_modules: &[String], backend: &Backend, writte
                 written,
             );
         }
-        Backend::C | Backend::Cpp | Backend::Go | Backend::Unknown(_) => {}
+        Backend::C | Backend::Cpp | Backend::Go | Backend::Java | Backend::Unknown(_) => {}
     }
 }
 
@@ -340,6 +351,13 @@ fn emit_main_file(
             write_file(
                 &out_dir.join("main.go"),
                 &codegen::emit_main_go(&sf, crate_name),
+                written,
+            );
+        }
+        Backend::Java => {
+            write_file(
+                &out_dir.join("Main.java"),
+                &codegen::emit_main_java(&sf, crate_name),
                 written,
             );
         }
