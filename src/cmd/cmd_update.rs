@@ -1,9 +1,9 @@
-//! `update` — reinstall Bullarchy GUI from the source repository.
+//! `update` — reinstall Bullarchy from the source repository.
 
-pub const DEFAULT_REPO: &str = "https://github.com/The-Bullang-Foundation/Bullarchy-gui.git";
+pub const DEFAULT_REPO: &str = "https://github.com/The-Bullang-Foundation/Bullarchy.git";
 
 pub fn cmd_update() {
-    println!("Updating bullarchy-gui...");
+    println!("Updating bullarchy...");
 
     let remote = match remote_head(DEFAULT_REPO, "main") {
         Some(h) => h,
@@ -13,7 +13,7 @@ pub fn cmd_update() {
         }
     };
 
-    let installed = installed_hash("bullarchy-gui", DEFAULT_REPO, "main");
+    let installed = installed_hash("bullarchy", DEFAULT_REPO, "main");
 
 	if installed.map_or(false, |h| h == remote) {
         println!("Already up to date.");
@@ -21,7 +21,7 @@ pub fn cmd_update() {
     }
 
     let status = std::process::Command::new("cargo")
-        .args(["install", "--git", DEFAULT_REPO, "--branch", "main", "--force", "bullarchy-gui"])
+        .args(["install", "--git", DEFAULT_REPO, "--branch", "main", "--force", "bullarchy"])
         .status();
 
     match status {
@@ -71,7 +71,7 @@ pub fn installed_hash(package: &str, repo: &str, branch: &str) -> Option<String>
             && key.contains(repo_fragment)
             && key.contains(&branch_tag)
         {
-            // key = "bullarchy-gui 1.0.0 (git+...?branch=main#e61e4db6c4c8...)"
+            // key = "bullarchy 1.0.0 (git+...?branch=main#e61e4db6c4c8...)"
             let hash = key.split('#').nth(1)?.trim_end_matches(')');
             return Some(hash.to_string());
         }
