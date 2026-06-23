@@ -12,4 +12,4 @@ pub use cmd_convert::cmd_convert;
 pub use cmd_editor_setup::cmd_editor_setup;
 pub use cmd_fmt::cmd_fmt;
 pub use cmd_init::cmd_init;
-pub use cmd_update::cmd_update;
+pub use cmd_update::{cmd_update, installed_hash, remote_head, DEFAULT_REPO};
