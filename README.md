@@ -1,97 +1,192 @@
-# Bullarchy GUI
+# Bullarchy
 
-A graphical interface for the [Bullarchy](https://github.com/My-sidequests/Bullarchy) toolchain — the project manager and transpiler CLI for the [Bullang](https://github.com/My-sidequests/Bullang) language.
+Bullarchy is the interactive toolchain for [Bullang](https://github.com/The-Bullang-Foundation/Bullang) projects. It handles project scaffolding, formatting, validation, transpilation, and editor integration.
 
----
-
-## How it works
-
-Bullarchy GUI runs a small [axum](https://github.com/tokio-rs/axum) HTTP server on `localhost:7474` and opens the interface in your default browser. The frontend communicates with the server over `POST /api/<command>`. No internet connection is required beyond the initial font load.
+It depends on Bullang as a library crate and can be installed independently — Bullang does not need to be installed as a binary for Bullarchy to work.
 
 ---
+
+## Prerequisite
+
+Cargo v1.92.0 or later.
 
 ## Installation
 
 ```bash
-cargo install --git https://github.com/My-sidequests/Bullarchy-gui.git
+cargo install --git https://github.com/The-Bullang-Foundation/Bullarchy.git
 ```
 
-Then launch it from any directory:
+If you are reinstalling over an existing version, add `--force`:
 
 ```bash
-bullarchy-gui
+cargo install --git https://github.com/The-Bullang-Foundation/Bullarchy.git --force bullarchy
 ```
 
-The browser will open automatically. The server stays running until you close the terminal or press `Ctrl+C`.
+After installation, `bullarchy` is available from anywhere.
 
 ---
 
-## Interface
+## Usage
 
-The home screen presents five cards arranged in two rows.
+```bash
+bullarchy
+```
 
-**Top row**
+Launches the interactive prompt:
 
-| Card | What it does |
-|---|---|
-| **init** | Scaffold a new Bullang project — depth-based or from a blueprint file |
-| **convert** | Transpile a `.bu` project or single file to rs / py / c / cpp / go |
-| **blueprint** | Design and save a `blueprint.bu` file in an interactive split-pane editor |
-
-**Bottom row**
-
-| Card | What it does |
-|---|---|
-| **control** | Expands into two sub-commands: **check** (validate + type-check + format drift) and **fmt** (reformat all `.bu` files, with optional dry-run) |
-| **options** | Expands into two sub-commands: **editor-setup** (write LSP configs for Neovim, Vim, Helix, Emacs) and **update** (reinstall from the latest commit) |
-
-### Blueprint editor
-
-The blueprint panel is a split-pane editor modelled after Obsidian:
-
-- **Left pane** — raw `blueprint.bu` textarea with live syntax validation. A `✓ valid` / `✗ error` indicator updates as you type.
-- **Right pane** — live tree preview showing the project structure inferred from what you've written (folders, files, functions, goal strings).
-- **Save bar** — type any absolute path and click **Save blueprint** to write the file to disk. Parent directories are created automatically.
+```
+command ->
+```
 
 ---
 
-## Architecture
+### `update`
+
+Reinstall Bullarchy from the latest commit on the main branch.
 
 ```
-bullarchy-gui/
-├── src/
-│   ├── main.rs            # axum server, embedded frontend, route registration
-│   ├── routes.rs          # HTTP handlers — one per command + blueprint save
-│   ├── cmd/               # command logic (mirrored from Bullarchy)
-│   ├── build.rs           # transpiler pass
-│   ├── codegen/           # 5 language backends
-│   ├── init/              # project scaffolding + blueprint parser
-│   ├── validator/         # structural + parse validation
-│   └── ...                # shared modules
-└── frontend/
-    ├── index.html         # app shell
-    ├── style.css          # cosmic dark theme (deep blue / nebula)
-    └── app.js             # panel logic, blueprint editor, star field, API calls
+command -> update
 ```
-
-The frontend is embedded into the binary at compile time via `include_str!` — no separate file serving is needed after installation.
-
-### API endpoints
-
-| Method | Path | Handler |
-|---|---|---|
-| `POST` | `/api/init` | `handle_init` |
-| `POST` | `/api/convert` | `handle_convert` |
-| `POST` | `/api/fmt` | `handle_fmt` |
-| `POST` | `/api/check` | `handle_check` |
-| `POST` | `/api/editor-setup` | `handle_editor_setup` |
-| `POST` | `/api/update` | `handle_update` |
-| `POST` | `/api/blueprint/save` | `handle_blueprint_save` |
 
 ---
 
-## Relationship to Bullarchy (terminal)
+## Commands
 
-Bullarchy GUI is a **separate repository** that mirrors the terminal version's command logic exactly. Both tools share the `bullang` library crate. The GUI captures stdout/stderr from each command via an OS-level pipe redirect and returns the output as JSON to the browser.
+### `init`
 
-For the terminal version, see [Bullarchy](https://github.com/My-sidequests/Bullarchy).
+Scaffold a new Bullang project.
+
+```
+command -> init my_project
+command -> init my_project --depth 4
+command -> init my_project --lang c --lib stdio.h
+command -> init my_project --blueprint blueprint.bu
+command -> init my_project --blueprint blueprint.bu --lang go
+```
+
+Options:
+
+- `--depth N` — hierarchy depth from 1 (skirmish only) to 6 (full war chain). Default: 2.
+- `--lang ext` — target language (`rs`, `py`, `c`, `cpp`, `go`). Written to inventory as `#lang:`.
+- `--lib header` — external library declaration. Can be repeated for multiple libraries.
+- `--blueprint file` — initialize from a `blueprint.bu` file instead of a depth value. Depth is inferred from the blueprint.
+- `--path dir` — where to create the project (default: current directory).
+
+Depth reference:
+
+```
+depth 1 → skirmish
+depth 2 → tactic → skirmish
+depth 3 → strategy → tactic → skirmish
+depth 4 → battle → strategy → tactic → skirmish
+depth 5 → theater → battle → strategy → tactic → skirmish
+depth 6 → war → theater → battle → strategy → tactic → skirmish
+```
+
+---
+
+### `convert`
+
+Transpile a Bullang project folder or a single `.bu` file.
+
+```
+command -> convert my_project
+command -> convert my_project -e py
+command -> convert path/to/file.bu
+command -> convert path/to/file.bu -o out.rs
+```
+
+Options:
+
+- `-n name` — output folder name (project mode).
+- `-e ext` — target language (`rs`, `py`, `c`, `cpp`, `go`). Overrides `#lang` from inventory.
+- `--out dir` — explicit output path (project mode).
+- `-o file` — output file (single-file mode; omit to write to stdout).
+
+---
+
+### `fmt`
+
+Format all `.bu` files in the project to canonical style. Rewrites files in place. Escape block contents are never modified.
+
+```
+command -> fmt
+command -> fmt my_project
+command -> fmt --dry-run
+```
+
+- With no argument, formats from the current directory.
+- `--dry-run` shows which files would change without writing anything.
+
+---
+
+### `check`
+
+Validate and type-check the project from the current directory. Also reports any files not in canonical format — run `fmt` to fix.
+
+```
+command -> check
+```
+
+Runs three passes in order:
+
+1. Structural validation (rank hierarchy, inventory consistency, function declarations)
+2. Type checking
+3. Format drift check
+
+Exits with a clear report on the first failing pass.
+
+---
+
+### `editor-setup`
+
+Write LSP configuration files for detected editors.
+
+```
+command -> editor-setup
+```
+
+Supports: Neovim (nvim-lspconfig), Helix, Emacs (eglot).
+For VS Code: install the extension through the VS Code extension page.
+
+The LSP server is built into Bullarchy and started directly by editors via `bullarchy lsp`.
+
+---
+
+### `help`
+
+Print the list of available commands.
+
+```
+command -> help
+```
+
+---
+
+### `exit`
+
+Quit Bullarchy.
+
+```
+command -> exit
+```
+
+---
+
+## LSP server
+
+Bullarchy includes the Bullang language server. Editors invoke it directly — it bypasses the interactive prompt:
+
+```bash
+bullarchy lsp
+```
+
+Capabilities: diagnostics, hover (function signatures), go-to-definition. Run `editor-setup` to have Bullarchy write the configuration for your editor automatically.
+
+---
+
+## Relationship to Bullang and Bullscript
+
+**[Bullang](https://github.com/The-Bullang-Foundation/Bullang)** is the language definition — grammar, AST, parser, formatter, and stdlib catalogue. Bullarchy depends on it as a library crate. Run `bullang stdlib` to browse available builtins.
+
+**[Bullscript](https://github.com/The-Bullang-Foundation/Bullscript)** is the interactive writing and testing tool. It does not transpile — that is Bullarchy's role. The two tools are designed to be used together: write and test with Bullscript, transpile and integrate with Bullarchy.

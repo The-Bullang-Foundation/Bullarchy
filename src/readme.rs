@@ -240,6 +240,6 @@ cd _my_project && cargo build
 
 ---
 
-*See the full book: https://github.com/My-sidequests/Bullang*
+*See the full book: https://github.com/The-Bullang-Foundation/Bullang*
 "#
 }

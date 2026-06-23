@@ -1,21 +1,16 @@
 [package]
-name    = "bullarchy-gui"
+name    = "bullarchy"
 version = "1.0.0"
 edition = "2024"
 
 [[bin]]
-name = "bullarchy-gui"
+name = "bullarchy"
 path = "src/main.rs"
 
 [dependencies]
-axum        = { version = "0.8", features = ["tokio"] }
-tokio       = { version = "1",   features = ["full"] }
-tower-http  = { version = "0.6", features = ["fs", "cors"] }
-serde       = { version = "1",   features = ["derive"] }
-serde_json  = "1"
-open        = "5"
-os_pipe     = "1"
-libc        = "0.2"
-bullang     = { git = "https://github.com/My-sidequests/Bullang.git" }
+rustyline = "14"
+bullang     = { git = "https://github.com/The-Bullang-Foundation/Bullang.git" }
 pest        = "=2.7.14"
 pest_derive = "=2.7.14"
+clap        = { version = "=4.4.18", features = ["derive"] }
+serde_json  = "1"

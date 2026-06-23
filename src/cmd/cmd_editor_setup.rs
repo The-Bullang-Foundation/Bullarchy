@@ -184,7 +184,7 @@ let g:ale_linters['bullang'] = ['bullang_lsp']
 
     // ── VS Code ───────────────────────────────────────────────────────────────
     println!("  [VS Code] install the extension (.vsix) from:");
-    println!("            https://github.com/My-sidequests/Bullang/releases");
+    println!("            https://github.com/The-Bullang-Foundation/Bullang/releases");
     println!("            The extension will use the bullang binary at: {}", bin);
     println!();
     println!("configured: {}   skipped (already set up): {}", configured, skipped);

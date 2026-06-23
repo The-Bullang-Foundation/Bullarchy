@@ -1,6 +1,6 @@
 //! `update` — reinstall Bullarchy GUI from the source repository.
 
-pub const DEFAULT_REPO: &str = "https://github.com/My-sidequests/Bullarchy-gui.git";
+pub const DEFAULT_REPO: &str = "https://github.com/The-Bullang-Foundation/Bullarchy-gui.git";
 
 pub fn cmd_update() {
     println!("Updating bullarchy-gui...");
