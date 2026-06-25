@@ -126,6 +126,12 @@ pub fn emit_builtin(name: &str, params: &[Param], backend: &Backend) -> Result<S
         return bull_mathlib::emit(name, params, backend);
     }
 
+    // Try netlib (only compiled in when --features netlib is set)
+    #[cfg(feature = "netlib")]
+    if bull_netlib::is_known_builtin(name) {
+        return bull_netlib::emit(name, params, backend);
+    }
+
     Err(format!(
         "'builtin::{}' is not a known builtin. \
          Run `bullang stdlib --list` to see available builtins. \
@@ -165,9 +171,3 @@ fn need<'a>(name: &str, params: &'a [Param], n: usize) -> Result<Vec<&'a str>, S
     }
     Ok(v)
 }
-
-    // Try netlib (only compiled in when --features netlib is set)
-    #[cfg(feature = "netlib")]
-    if bull_netlib::is_known_builtin(name) {
-        return bull_netlib::emit(name, params, backend);
-    }
