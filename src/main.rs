@@ -141,6 +141,11 @@ fn run_cli_command(cmd: &str, rest: &[String]) {
             cmd::cmd_add(&args);
         }
 
+        "remove" => {
+            let args: Vec<&str> = parts[1..].to_vec();
+            cmd::cmd_remove(&args);
+        }
+
         "--gui" => {
             eprintln!("  Use --gui without other arguments to launch the GUI.");
         }
@@ -219,6 +224,7 @@ fn print_help() {
     println!("    add <name>                  Install a package from the registry");
     println!("    add <name>@<version>        Install a specific version");
     println!("    add <https://...>           Install from a git URL");
+    println!("    remove <name>               Uninstall a package");
     println!();
     println!("    fmt [folder] [--dry-run]    Format all .bu files to canonical style");
     println!("    check                       Validate, type-check, and check formatting");
