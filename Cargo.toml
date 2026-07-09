@@ -1,0 +1,22 @@
+[package]
+name    = "bullarchy"
+version = "1.0.0"
+edition = "2024"
+
+[[bin]]
+name = "bullarchy"
+path = "src/main.rs"
+
+[features]
+mathlib = ["dep:bull-mathlib"]
+netlib  = ["dep:bull-netlib"]
+
+[dependencies]
+rustyline    = "14"
+clap         = { version = "=4.4.18", features = ["derive"] }
+serde_json   = "1"
+bullang      = { git = "https://github.com/The-Bullang-Foundation/Bullang.git" }
+pest         = "=2.7.14"
+pest_derive  = "=2.7.14"
+bull-mathlib = { git = "https://github.com/The-Bullang-Foundation/Mathlib.git", optional = true }
+bull-netlib  = { git = "https://github.com/The-Bullang-Foundation/Netlib.git",  optional = true }
