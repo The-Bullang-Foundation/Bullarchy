@@ -22,17 +22,66 @@ fn main() {
         return;
     }
 
+    let first = args.get(1).map(|s| s.as_str());
+
+    // --cli → interactive REPL
+    if first == Some("--cli") {
+        run_cli_repl();
+        return;
+    }
+
     // Direct command: bullarchy <cmd> [args...] — run and exit
-    let has_cmd = args.len() > 1
-        && args[1] != "--cli"
-        && args[1] != "--gui";
+    let has_cmd = args.len() > 1 && first != Some("--gui");
 
     if has_cmd {
         run_cli_command(&args[1], &args[2..]);
         return;
     }
 
-    // --cli or no args → interactive REPL
+    // No args or --gui → launch the GUI
+    launch_gui();
+}
+
+// ── GUI launcher ──────────────────────────────────────────────────────────────
+
+fn launch_gui() {
+    // Look for bullarchy-gui in the same locations the GUI looks for bullarchy
+    let candidates = vec![
+        // Same directory as this binary
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.join("bullarchy-gui")))
+            .unwrap_or_default(),
+        // ~/.local/bin (Linux)
+        {
+            let home = std::env::var("HOME").unwrap_or_default();
+            std::path::PathBuf::from(&home).join(".local").join("bin").join("bullarchy-gui")
+        },
+        // /usr/local/bin (macOS)
+        std::path::PathBuf::from("/usr/local/bin/bullarchy-gui"),
+        // Windows: %USERPROFILE%\AppData\Local\Programs\bullarchy-gui.exe
+        {
+            let home = std::env::var("USERPROFILE").unwrap_or_default();
+            std::path::PathBuf::from(&home)
+                .join("AppData").join("Local").join("Programs")
+                .join("bullarchy-gui.exe")
+        },
+    ];
+
+    for path in &candidates {
+        if path.exists() {
+            match std::process::Command::new(path).spawn() {
+                Ok(_)  => return,
+                Err(e) => eprintln!("  Failed to launch GUI: {}", e),
+            }
+        }
+    }
+
+    // GUI not found — fall back to CLI REPL with a hint
+    eprintln!("  bullarchy-gui not found. Launching CLI instead.");
+    eprintln!("  To install the GUI, run the Bullang installer:");
+    eprintln!("  https://github.com/The-Bullang-Foundation/bullang-installer");
+    eprintln!();
     run_cli_repl();
 }
 
@@ -133,7 +182,8 @@ fn print_help() {
     println!();
     println!("  Usage:  bullarchy [command] [options]");
     println!();
-    println!("  No arguments / --cli     Launch the interactive terminal REPL");
+    println!("  No arguments / --gui     Launch the graphical interface");
+    println!("  --cli                    Launch the interactive terminal REPL");
     println!();
     println!("  Available commands:");
     println!();
