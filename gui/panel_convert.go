@@ -21,8 +21,16 @@ func buildConvertPanel(bin string) fyne.CanvasObject {
 		d.Show()
 	})
 
-	secondEntry := widget.NewEntry()
-	secondEntry.SetPlaceHolder("rs / py / c / cpp / go / java  or  out.rs  (optional)")
+	// Language dropdown — explicit list so Java is clearly visible
+	langSelect := widget.NewSelect(
+		[]string{"(from #lang directive)", "rs", "py", "c", "cpp", "go", "java"},
+		nil,
+	)
+	langSelect.SetSelected("(from #lang directive)")
+
+	// Output path (single-file mode only)
+	outputEntry := widget.NewEntry()
+	outputEntry.SetPlaceHolder("out.rs  (optional, single-file mode only)")
 
 	out, scroll := consoleOutput()
 	btn := runButton("Run convert")
@@ -32,16 +40,22 @@ func buildConvertPanel(bin string) fyne.CanvasObject {
 		if t := targetEntry.Text; t != "" {
 			args = append(args, t)
 		}
-		if s := secondEntry.Text; s != "" {
-			args = append(args, s)
+		// Add language override if selected
+		if lang := langSelect.Selected; lang != "(from #lang directive)" && lang != "" {
+			args = append(args, "-e", lang)
+		}
+		// Add output file if specified
+		if o := outputEntry.Text; o != "" {
+			args = append(args, "-o", o)
 		}
 		runBullarchy(bin, out, btn, args...)
 	}
 
 	form := container.NewVBox(
 		labeledField("Source path", container.NewBorder(nil, nil, nil, targetBrowse, targetEntry)),
-		labeledField("Language / Output", secondEntry),
-		infoLabel("Short ext = language override (e.g. rs). Filename = explicit output path."),
+		labeledField("Target language", langSelect),
+		labeledField("Output file", outputEntry),
+		infoLabel("Leave language on '(from #lang directive)' to use the project's declared language."),
 		btn,
 	)
 
