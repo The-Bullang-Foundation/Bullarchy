@@ -147,7 +147,7 @@ fn emit_function_py(func: &Bullet) -> String {
         .map(|p| format!("{}: {}", py_param_name(&p.name), bu_type_to_python(&p.ty)))
         .collect::<Vec<_>>().join(", ");
 
-    let ret_ty = bu_type_to_python(&func.output.as_ref().expect("bullet has no output_decl — cannot transpile").ty);
+    let ret_ty = bu_type_to_python(&func.output.as_ref().map(|o| &o.ty).unwrap_or(&bullang::ast::BuType::Named("()".to_string())));
     out.push_str(&format!("def {}({}) -> {}:\n", func.name, params, ret_ty));
 
     emit_body_py(&mut out, &func.body, &func.params);

@@ -118,7 +118,7 @@ pub fn collect_tuple_types(source_files: &[(String, &SourceFile)]) -> Vec<Vec<bu
     for (_, sf) in source_files {
         for func in &sf.bullets {
             for param in &func.params { scan_type(&param.ty, &mut seen); }
-            scan_type(&func.output.as_ref().expect("bullet has no output_decl — cannot transpile").ty, &mut seen);
+            scan_type(&func.output.as_ref().map(|o| &o.ty).unwrap_or(&bullang::ast::BuType::Named("()".to_string())), &mut seen);
         }
     }
     seen
@@ -258,7 +258,7 @@ fn push_unique(v: &mut Vec<&'static str>, s: &'static str) {
 fn emit_function_go(func: &Bullet) -> String {
     let mut out   = String::new();
     let params    = go_param_list(&func.params);
-    let ret       = bu_type_to_go(&func.output.as_ref().expect("bullet has no output_decl — cannot transpile").ty);
+    let ret       = bu_type_to_go(&func.output.as_ref().map(|o| &o.ty).unwrap_or(&bullang::ast::BuType::Named("()".to_string())));
     let go_name   = to_pascal_case(&func.name);
 
     let type_param_str = if func.type_params.is_empty() {

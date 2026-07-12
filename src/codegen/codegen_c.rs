@@ -69,7 +69,7 @@ pub fn emit_enum_c(e: &bullang::ast::EnumDef) -> String {
 pub fn needs_foreign_types(file: &SourceFile) -> bool {
     file.bullets.iter().any(|b| {
         b.params.iter().any(|p| type_needs_foreign(&p.ty))
-            || type_needs_foreign(&b.output.as_ref().expect("bullet has no output_decl — cannot transpile").ty)
+            || type_needs_foreign(&b.output.as_ref().map(|o| &o.ty).unwrap_or(&bullang::ast::BuType::Named("()".to_string())))
     })
 }
 
@@ -80,7 +80,7 @@ pub fn needs_generic_types(file: &SourceFile) -> bool {
 /// `<stdbool.h>` — needed when `bool` appears anywhere in the public API.
 pub fn needs_stdbool(file: &SourceFile) -> bool {
     file.bullets.iter().any(|b| {
-        type_is_bool(&b.output.as_ref().expect("bullet has no output_decl — cannot transpile").ty) || b.params.iter().any(|p| type_is_bool(&p.ty))
+        type_is_bool(&b.output.as_ref().map(|o| &o.ty).unwrap_or(&bullang::ast::BuType::Named("()".to_string()))) || b.params.iter().any(|p| type_is_bool(&p.ty))
     })
 }
 
@@ -98,7 +98,7 @@ fn type_is_bool(ty: &BuType) -> bool {
 pub fn needs_stdlib(file: &SourceFile) -> bool {
     const MARKERS: &[&str] = &["malloc", "calloc", "realloc", "free", "exit", "abort", "NULL"];
     file.bullets.iter().any(|b| {
-        any_type_needs_stdlib(&b.output.as_ref().expect("bullet has no output_decl — cannot transpile").ty)
+        any_type_needs_stdlib(&b.output.as_ref().map(|o| &o.ty).unwrap_or(&bullang::ast::BuType::Named("()".to_string())))
             || b.params.iter().any(|p| any_type_needs_stdlib(&p.ty))
             || native_blocks_contain(b, MARKERS)
     })
@@ -213,7 +213,7 @@ pub fn emit_header_c(
         out.push_str(&format!("/* {} */\n", filename));
         for func in &sf.bullets {
             let params = c_param_list(&func.params);
-            let ret    = bu_type_to_c(&func.output.as_ref().expect("bullet has no output_decl — cannot transpile").ty);
+            let ret    = bu_type_to_c(&func.output.as_ref().map(|o| &o.ty).unwrap_or(&bullang::ast::BuType::Named("()".to_string())));
             out.push_str(&format!("{} {}({});\n", ret, func.name, params));
         }
         out.push('\n');
@@ -290,14 +290,14 @@ fn emit_function_c(func: &Bullet) -> String {
 
     if func.type_params.is_empty() {
         let params = c_param_list(&func.params);
-        let ret    = bu_type_to_c(&func.output.as_ref().expect("bullet has no output_decl — cannot transpile").ty);
+        let ret    = bu_type_to_c(&func.output.as_ref().map(|o| &o.ty).unwrap_or(&bullang::ast::BuType::Named("()".to_string())));
         out.push_str(&format!("{} {}({}) {{\n", ret, func.name, params));
         emit_body_c(&mut out, &func.body, &func.params, &Backend::C);
     } else {
         // Generic function — type params become BuVal.
         out.push_str("#include \"bu_generic.h\"\n");
         let params = c_generic_param_list(&func.params, &func.type_params);
-        let ret    = c_generic_type(&func.output.as_ref().expect("bullet has no output_decl — cannot transpile").ty, &func.type_params);
+        let ret    = c_generic_type(&func.output.as_ref().map(|o| &o.ty).unwrap_or(&bullang::ast::BuType::Named("()".to_string())), &func.type_params);
         out.push_str(&format!("{} {}({}) {{\n", ret, func.name, params));
         emit_body_c_generic(&mut out, &func.body, &func.type_params);
     }
@@ -662,7 +662,7 @@ pub fn collect_tuple_types_c(source_files: &[(String, &SourceFile)]) -> Vec<Vec<
 
     for (_, sf) in source_files {
         for func in &sf.bullets {
-            scan(&func.output.as_ref().expect("bullet has no output_decl — cannot transpile").ty, &mut seen);
+            scan(&func.output.as_ref().map(|o| &o.ty).unwrap_or(&bullang::ast::BuType::Named("()".to_string())), &mut seen);
             for p in &func.params { scan(&p.ty, &mut seen); }
         }
     }

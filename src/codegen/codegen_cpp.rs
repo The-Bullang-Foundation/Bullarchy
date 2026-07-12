@@ -121,7 +121,7 @@ pub fn emit_header_cpp(
         out.push_str(&format!("// {}\n", filename));
         for func in &sf.bullets {
             let params = cpp_param_list(&func.params);
-            let ret    = bu_type_to_cpp(&func.output.as_ref().expect("bullet has no output_decl — cannot transpile").ty);
+            let ret    = bu_type_to_cpp(&func.output.as_ref().map(|o| &o.ty).unwrap_or(&bullang::ast::BuType::Named("()".to_string())));
             out.push_str(&format!("{} {}({});\n", ret, func.name, params));
         }
         out.push('\n');
@@ -191,7 +191,7 @@ pub fn emit_makefile_cpp(
 fn emit_function_cpp(func: &Bullet) -> String {
     let mut out   = String::new();
     let params    = cpp_param_list(&func.params);
-    let ret       = bu_type_to_cpp(&func.output.as_ref().expect("bullet has no output_decl — cannot transpile").ty);
+    let ret       = bu_type_to_cpp(&func.output.as_ref().map(|o| &o.ty).unwrap_or(&bullang::ast::BuType::Named("()".to_string())));
 
     if !func.type_params.is_empty() {
         let tparams = func.type_params.iter()

@@ -250,7 +250,9 @@ fn emit_function(func: &Bullet, backend: &Backend) -> String {
     let params = func.params.iter()
         .map(|p| format!("{}: {}", p.name, bu_type_to_rust(&p.ty)))
         .collect::<Vec<_>>().join(", ");
-    let ret_ty = bu_type_to_rust(&func.output.as_ref().expect("bullet has no output_decl — cannot transpile").ty);
+    let ret_ty = func.output.as_ref()
+        .map(|o| bu_type_to_rust(&o.ty))
+        .unwrap_or_else(|| "()".to_string());
 
     if func.type_params.is_empty() {
         out.push_str(&format!("pub fn {}({}) -> {} {{\n", func.name, params, ret_ty));

@@ -129,7 +129,7 @@ fn emit_function_java(func: &Bullet) -> String {
     let mut out = String::new();
     let ret = bu_type_to_java(
         &func.output.as_ref()
-            .expect("bullet has no output_decl — cannot transpile")
+            .map(|o| o).unwrap_or_else(|| panic!("no output"))
             .ty,
     );
     let params: String = func.params.iter()
