@@ -303,14 +303,44 @@ fn emit_body(out: &mut String, body: &BulletBody, params: &[Param], backend: &Ba
         BulletBody::Pipes(pipes) => {
             let last = pipes.len().saturating_sub(1);
             for (i, pipe) in pipes.iter().enumerate() {
-                let expr_str = emit_expr(&pipe.expr);
-                if i == last {
-                    out.push_str(&format!("    let {} = {};\n", pipe.binding.as_deref().unwrap_or("_"), expr_str));
-                    out.push_str(&format!("    {}\n", pipe.binding.as_deref().unwrap_or("_")));
-                } else if pipe.propagate {
-                    out.push_str(&format!("    let {} = {}?;\n", pipe.binding.as_deref().unwrap_or("_"), expr_str));
+                // Special case: builtin::name with implicit pipe inputs
+                // e.g. (s) : builtin::to_upper -> {result}
+                let expr_str = if let Expr::Atom(Atom::BuiltinNoArgs(name)) = &pipe.expr {
+                    // Build synthetic Param list from pipe inputs
+                    let synthetic_params: Vec<bullang::ast::Param> = pipe.inputs
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, input)| {
+                            let param_name = match input {
+                                Expr::Atom(Atom::Ident(s)) => s.clone(),
+                                _ => format!("__pipe_arg_{}", idx),
+                            };
+                            bullang::ast::Param {
+                                name: param_name,
+                                ty:   bullang::ast::BuType::Unknown,
+                            }
+                        })
+                        .collect();
+                    match stdlib::emit_builtin(name, &synthetic_params, backend) {
+                        Ok(code) => code,
+                        Err(e)   => format!("compile_error!(\"{e}\")"),
+                    }
                 } else {
-                    out.push_str(&format!("    let {} = {};\n", pipe.binding.as_deref().unwrap_or("_"), expr_str));
+                    emit_expr(&pipe.expr)
+                };
+
+                let binding = pipe.binding.as_deref().unwrap_or("_");
+                if i == last {
+                    if binding == "_" || pipe.binding.is_none() {
+                        out.push_str(&format!("    {};\n", expr_str));
+                    } else {
+                        out.push_str(&format!("    let {} = {};\n", binding, expr_str));
+                        out.push_str(&format!("    {}\n", binding));
+                    }
+                } else if pipe.propagate {
+                    out.push_str(&format!("    let {} = {}?;\n", binding, expr_str));
+                } else {
+                    out.push_str(&format!("    let {} = {};\n", binding, expr_str));
                 }
             }
         }
