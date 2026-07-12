@@ -191,7 +191,7 @@ fn emit_body_java(
                             }
                         })
                         .collect();
-                    match crate::stdlib::emit_builtin(name, &synthetic_params, backend) {
+                    match crate::stdlib::emit_builtin(name, &synthetic_params, &Backend::Java) {
                         Ok(code) => code,
                         Err(e)   => format!("/* ERROR: {e} */"),
                     }
@@ -216,13 +216,13 @@ fn emit_body_java(
                         .map(|o| bu_type_to_java(&o.ty))
                         .unwrap_or_else(|| "void".to_string());
                     if ret == "void" {
-                        out.push_str(&format!("        {};\n", expr));
+                        out.push_str(&format!("        {};\n", expr_str));
                     } else {
-                        out.push_str(&format!("        var {} = {};\n", binding, expr));
+                        out.push_str(&format!("        var {} = {};\n", binding, expr_str));
                         out.push_str(&format!("        return {};\n", binding));
                     }
                 } else {
-                    out.push_str(&format!("        var {} = {};\n", binding, expr));
+                    out.push_str(&format!("        var {} = {};\n", binding, expr_str));
                 }
             }
         }

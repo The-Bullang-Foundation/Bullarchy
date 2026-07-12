@@ -271,7 +271,7 @@ fn emit_body_cpp(out: &mut String, body: &BulletBody, params: &[Param]) {
                             }
                         })
                         .collect();
-                    match crate::stdlib::emit_builtin(name, &synthetic_params, backend) {
+                    match crate::stdlib::emit_builtin(name, &synthetic_params, &Backend::Cpp) {
                         Ok(code) => code,
                         Err(e)   => format!("/* ERROR: {e} */"),
                     }

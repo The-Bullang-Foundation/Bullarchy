@@ -326,7 +326,7 @@ fn emit_body_go(out: &mut String, body: &BulletBody, params: &[Param], output: &
                             }
                         })
                         .collect();
-                    match crate::stdlib::emit_builtin(name, &synthetic_params, backend) {
+                    match crate::stdlib::emit_builtin(name, &synthetic_params, &Backend::Go) {
                         Ok(code) => code,
                         Err(e)   => format!("/* ERROR: {e} */"),
                     }
@@ -345,7 +345,7 @@ fn emit_body_go(out: &mut String, body: &BulletBody, params: &[Param], output: &
                         }
                     }
                 };
-                out.push_str(&format!("\t{} := {}\n", pipe.binding.as_deref().unwrap_or("_"), expr));
+                out.push_str(&format!("\t{} := {}\n", pipe.binding.as_deref().unwrap_or("_"), expr_str));
                 if pipe.propagate {
                     // Go has no ? — emit an explicit nil/error check
                     out.push_str(&format!(
