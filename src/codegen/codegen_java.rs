@@ -175,7 +175,41 @@ fn emit_body_java(
             if pipes.is_empty() { return; }
             let last = pipes.len().saturating_sub(1);
             for (i, pipe) in pipes.iter().enumerate() {
-                let expr = emit_expr_java(&pipe.expr);
+                // Handle builtin::name with implicit pipe inputs
+                let expr_str = if let Expr::Atom(Atom::BuiltinNoArgs(name)) = &pipe.expr {
+                    let synthetic_params: Vec<bullang::ast::Param> = pipe.inputs
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, input)| {
+                            let param_name = match input {
+                                Expr::Atom(Atom::Ident(s)) => s.clone(),
+                                _ => format!("__pipe_arg_{}", idx),
+                            };
+                            bullang::ast::Param {
+                                name: param_name,
+                                ty:   bullang::ast::BuType::Unknown,
+                            }
+                        })
+                        .collect();
+                    match crate::stdlib::emit_builtin(name, &synthetic_params, backend) {
+                        Ok(code) => code,
+                        Err(e)   => format!("/* ERROR: {e} */"),
+                    }
+                } else {
+                    let base = emit_expr_java(&pipe.expr);
+                    let inputs_str = pipe.inputs.iter()
+                        .map(emit_expr_java)
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    if inputs_str.is_empty() {
+                        base
+                    } else {
+                        match &pipe.expr {
+                            Expr::Atom(Atom::Call { .. }) => base,
+                            _ => format!("{}({})", base, inputs_str),
+                        }
+                    }
+                };
                 let binding = pipe.binding.as_deref().unwrap_or("__v");
                 if i == last {
                     let ret = output.as_ref()

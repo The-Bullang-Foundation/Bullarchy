@@ -328,7 +328,21 @@ fn emit_body(out: &mut String, body: &BulletBody, params: &[Param], backend: &Ba
                         Err(e)   => format!("compile_error!(\"{e}\")"),
                     }
                 } else {
-                    emit_expr(&pipe.expr)
+                    // For function refs and idents, pass pipe inputs as arguments
+                    let base = emit_expr(&pipe.expr);
+                    let inputs_str = pipe.inputs.iter()
+                        .map(emit_expr)
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    if inputs_str.is_empty() {
+                        base
+                    } else {
+                        // If already a call (has parens), use as-is; otherwise add args
+                        match &pipe.expr {
+                            Expr::Atom(Atom::Call { .. }) => base,
+                            _ => format!("{}({})", base, inputs_str),
+                        }
+                    }
                 };
 
                 let binding = pipe.binding.as_deref().unwrap_or("_");

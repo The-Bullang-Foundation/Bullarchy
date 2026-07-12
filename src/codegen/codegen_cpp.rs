@@ -255,7 +255,41 @@ fn emit_body_cpp(out: &mut String, body: &BulletBody, params: &[Param]) {
             if pipes.is_empty() { return; }
             let last = pipes.len().saturating_sub(1);
             for (i, pipe) in pipes.iter().enumerate() {
-                let expr_str = emit_expr_cpp(&pipe.expr);
+                // Handle builtin::name with implicit pipe inputs
+                let expr_str = if let Expr::Atom(Atom::BuiltinNoArgs(name)) = &pipe.expr {
+                    let synthetic_params: Vec<bullang::ast::Param> = pipe.inputs
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, input)| {
+                            let param_name = match input {
+                                Expr::Atom(Atom::Ident(s)) => s.clone(),
+                                _ => format!("__pipe_arg_{}", idx),
+                            };
+                            bullang::ast::Param {
+                                name: param_name,
+                                ty:   bullang::ast::BuType::Unknown,
+                            }
+                        })
+                        .collect();
+                    match crate::stdlib::emit_builtin(name, &synthetic_params, backend) {
+                        Ok(code) => code,
+                        Err(e)   => format!("/* ERROR: {e} */"),
+                    }
+                } else {
+                    let base = emit_expr_cpp(&pipe.expr);
+                    let inputs_str = pipe.inputs.iter()
+                        .map(emit_expr_cpp)
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    if inputs_str.is_empty() {
+                        base
+                    } else {
+                        match &pipe.expr {
+                            Expr::Atom(Atom::Call { .. }) => base,
+                            _ => format!("{}({})", base, inputs_str),
+                        }
+                    }
+                };
                 if i == last {
                     out.push_str(&format!("    return {};\n", expr_str));
                 } else {
