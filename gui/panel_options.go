@@ -32,12 +32,14 @@ func buildEditorSetupTab(bin string) fyne.CanvasObject {
 
 func buildUpdateTab(bin string) fyne.CanvasObject {
 	out, scroll := consoleOutput()
-	btn := runButton("Update Bullarchy")
+	btn := runButton("Update all Bullang tools")
+
 	btn.OnTapped = func() {
 		runBullarchy(bin, out, btn, "update")
 	}
+
 	return container.NewVBox(
-		infoLabel("Reinstall Bullarchy from the latest commit on the main branch."),
+		infoLabel("Clears cargo caches and reinstalls Bullang, Bullarchy and Bullscript\nfrom their latest commits on main. May take a few minutes."),
 		widget.NewSeparator(),
 		btn,
 		widget.NewSeparator(),
