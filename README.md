@@ -32,7 +32,7 @@ After installation, `bullarchy` is available from anywhere.
 bullarchy
 ```
 
-Launches the graphical interface in your browser at `http://localhost:7474`.
+Launches the native graphical interface (`bullarchy-gui`, built with Go/Fyne). Bullarchy looks for the `bullarchy-gui` binary next to itself, then in `~/.local/bin`, `/usr/local/bin`, or the Windows `AppData\Local\Programs` folder. If it isn't found, Bullarchy falls back to the CLI REPL and prints install instructions.
 
 ```bash
 bullarchy --cli
