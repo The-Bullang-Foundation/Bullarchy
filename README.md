@@ -172,7 +172,7 @@ The LSP server is built into Bullarchy and started directly by editors via `bull
 
 ### `update`
 
-Reinstall Bullarchy from the latest commit on the main branch.
+Clean-reinstall the whole Bullang toolset from the latest commit on each repo's main branch: Bullang, Bullarchy, and Bullscript via `cargo install --force`, plus a rebuild of `bullarchy-gui` from the `gui/` folder of the freshly cloned Bullarchy source (requires Go — this step mirrors what the GUI installer does, minus installing target-language toolchains).
 
 ```bash
 bullarchy update

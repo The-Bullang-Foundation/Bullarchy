@@ -3,8 +3,13 @@
 //! Steps:
 //!   1. Clear cargo git cache for all Bullang repos
 //!   2. cargo install --force for Bullang, Bullarchy, Bullscript
+//!   3. Rebuild bullarchy-gui (Go/Fyne) from the gui/ folder of the
+//!      Bullarchy checkout cargo just cloned, and reinstall it next to
+//!      the bullarchy binary. Assumes Go is already installed (this
+//!      mirrors what the GUI installer does, minus the target-language
+//!      toolchain setup).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub const DEFAULT_REPO: &str = "https://github.com/The-Bullang-Foundation/Bullarchy.git";
 
@@ -39,7 +44,7 @@ pub fn cmd_update() {
     }
 
     // Also remove old installed binaries so cargo reinstalls cleanly
-    for bin in &["bullang", "bullarchy", "bullscript"] {
+    for bin in &["bullang", "bullarchy", "bullscript", "bullarchy-gui"] {
         let bin_path = cargo_home.join("bin").join(bin);
         if bin_path.exists() {
             let _ = std::fs::remove_file(&bin_path);
@@ -84,12 +89,91 @@ pub fn cmd_update() {
         }
     }
 
+    // ── Step 3: Rebuild and reinstall the GUI ───────────────────────────────
+
+    println!("  Rebuilding bullarchy-gui...");
+    match update_gui(&cargo_home) {
+        Ok(path) => println!("  ✓ bullarchy-gui updated -> {}\n", path.display()),
+        Err(e) => {
+            eprintln!("  ✗ bullarchy-gui update failed: {}\n", e);
+            failed = true;
+        }
+    }
+
     if failed {
         eprintln!("  Some updates failed. Check the output above.");
     } else {
         println!("  ✓ All Bullang tools updated successfully.");
         println!("  Restart your terminal to ensure the new binaries are active.");
     }
+}
+
+// ── GUI rebuild ──────────────────────────────────────────────────────────────
+
+/// Find the gui/ folder inside cargo's own checkout of Bullarchy (the one
+/// `cargo install` just cloned in step 2), build it with `go build`, and
+/// install the resulting binary into the cargo bin dir — the same folder
+/// `bullarchy` itself lives in, which is the first place `launch_gui()`
+/// looks. Returns the installed binary's path on success.
+fn update_gui(cargo_home: &Path) -> Result<PathBuf, String> {
+    let gui_src = find_bullarchy_gui_dir(cargo_home)
+        .ok_or_else(|| "could not find gui/ in cargo's Bullarchy checkout".to_string())?;
+
+    let out_name = if cfg!(windows) { "bullarchy-gui.exe" } else { "bullarchy-gui" };
+    let built_path = gui_src.join(out_name);
+
+    println!("    building from {}", gui_src.display());
+    let status = std::process::Command::new("go")
+        .args(["build", "-o", out_name, "."])
+        .current_dir(&gui_src)
+        .status()
+        .map_err(|e| format!("failed to run `go build`: {}", e))?;
+
+    if !status.success() {
+        return Err(format!("`go build` exited with {}", status));
+    }
+
+    let target = cargo_home.join("bin").join(out_name);
+    if target.exists() {
+        std::fs::remove_file(&target)
+            .map_err(|e| format!("could not remove old {}: {}", target.display(), e))?;
+    }
+    std::fs::copy(&built_path, &target)
+        .map_err(|e| format!("could not install {}: {}", target.display(), e))?;
+    let _ = std::fs::remove_file(&built_path);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(&target) {
+            let mut perms = meta.permissions();
+            perms.set_mode(perms.mode() | 0o755);
+            let _ = std::fs::set_permissions(&target, perms);
+        }
+    }
+
+    Ok(target)
+}
+
+/// Locate `gui/` inside the most recently checked-out Bullarchy source
+/// under `~/.cargo/git/checkouts/`.
+fn find_bullarchy_gui_dir(cargo_home: &Path) -> Option<PathBuf> {
+    let checkouts = cargo_home.join("git").join("checkouts");
+    let repo_dir = std::fs::read_dir(&checkouts).ok()?
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().to_lowercase().contains("bullarchy"))
+        .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok())?
+        .path();
+
+    // Inside <repo_dir>/, each checked-out commit lives in its own subfolder.
+    let commit_dir = std::fs::read_dir(&repo_dir).ok()?
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok())?
+        .path();
+
+    let gui_dir = commit_dir.join("gui");
+    if gui_dir.join("main.go").exists() { Some(gui_dir) } else { None }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
