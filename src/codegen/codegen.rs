@@ -2,13 +2,58 @@
 
 use bullang::ast::*;
 use crate::stdlib;
+use std::collections::BTreeSet;
+
+// ── Hoisted imports ───────────────────────────────────────────────────────────
+
+/// Walk every bullet in `file` and collect the Rust `use` lines required by
+/// any stdlib builtins referenced in pipe bodies (e.g. `builtin::out`,
+/// `builtin::in`, `builtin::open`), deduplicated and in a stable order —
+/// so they can be emitted once at the top of the file instead of inline at
+/// every call site.
+fn collect_rust_imports(file: &SourceFile) -> Vec<&'static str> {
+    let mut names: BTreeSet<&str> = BTreeSet::new();
+    for func in &file.bullets {
+        collect_builtin_names(&func.body, &mut names);
+    }
+
+    let mut imports: BTreeSet<&'static str> = BTreeSet::new();
+    for name in names {
+        for import in stdlib::required_imports(name, &Backend::Rust) {
+            imports.insert(import);
+        }
+    }
+    imports.into_iter().collect()
+}
+
+fn collect_builtin_names<'a>(body: &'a BulletBody, out: &mut BTreeSet<&'a str>) {
+    if let BulletBody::Pipes(pipes) = body {
+        for pipe in pipes {
+            if let Expr::Atom(Atom::BuiltinNoArgs(name)) = &pipe.expr {
+                out.insert(name.as_str());
+            }
+        }
+    }
+}
+
+fn emit_imports(out: &mut String, file: &SourceFile) {
+    let imports = collect_rust_imports(file);
+    for import in &imports {
+        out.push_str(import);
+        out.push('\n');
+    }
+    if !imports.is_empty() {
+        out.push('\n');
+    }
+}
 
 // ── Source file → Rust ────────────────────────────────────────────────────────
 
 pub fn emit_source(file: &SourceFile) -> String {
     let mut out = String::new();
     out.push_str("#[allow(unused_imports)]\n");
-    out.push_str("use crate::*;\n\n");
+    out.push_str("use crate::*;\n");
+    emit_imports(&mut out, file);
     for func in &file.bullets {
         out.push_str(&emit_function(func, &Backend::Rust));
         out.push('\n');
@@ -16,10 +61,11 @@ pub fn emit_source(file: &SourceFile) -> String {
     out
 }
 
-/// Bare single-file mode: only the function bodies, no use declarations,
-/// no attributes, no preamble.
+/// Bare single-file mode: only the function bodies (plus any hoisted
+/// builtin imports), no `use crate::*`, no attributes, no other preamble.
 pub fn emit_bare_rs(file: &SourceFile) -> String {
     let mut out = String::new();
+    emit_imports(&mut out, file);
     for func in &file.bullets {
         out.push_str(&emit_function(func, &Backend::Rust));
         out.push('\n');
@@ -58,7 +104,8 @@ pub fn emit_enum_rs(e: &bullang::ast::EnumDef) -> String {
 /// All other functions in main.bu (helpers) get `fn` but not `pub`.
 pub fn emit_main(file: &SourceFile, crate_name: &str) -> String {
     let mut out = String::new();
-    out.push_str(&format!("use {}::*;\n\n", crate_name));
+    out.push_str(&format!("use {}::*;\n", crate_name));
+    emit_imports(&mut out, file);
     for func in &file.bullets {
         if func.name == "main" {
             out.push_str(&emit_main_function(func));

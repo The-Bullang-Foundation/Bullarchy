@@ -23,7 +23,6 @@ pub fn emit(params: &[Param], backend: &Backend) -> Result<String, String> {
         // a raw fd via IntoRawFd.  Returns -1 on any error.
         Backend::Rust => format!(
             "{{\
-               use std::os::unix::io::IntoRawFd;\
                let __mode: &str = {mode}.as_str();\
                let mut __oo = std::fs::OpenOptions::new();\
                match __mode {{\

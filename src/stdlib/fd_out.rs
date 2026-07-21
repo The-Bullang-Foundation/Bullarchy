@@ -19,9 +19,6 @@ pub fn emit(params: &[Param], backend: &Backend) -> Result<String, String> {
         // the File destructor closing the fd on drop.
         Backend::Rust => format!(
             "{{\
-               use std::io::Write;\
-               use std::os::unix::io::FromRawFd;\
-               use std::mem::ManuallyDrop;\
                let mut __f = ManuallyDrop::new(unsafe {{ \
                  std::fs::File::from_raw_fd({fd}) \
                }});\

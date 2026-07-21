@@ -20,8 +20,6 @@ pub fn emit(params: &[Param], backend: &Backend) -> Result<String, String> {
         // The fd is NOT closed here — ownership stays with the caller.
         Backend::Rust => format!(
             "{{\
-               use std::io::{{BufRead, BufReader}};\
-               use std::os::unix::io::FromRawFd;\
                let __fd = {fd};\
                let __f  = unsafe {{ std::fs::File::from_raw_fd(__fd) }};\
                let mut __r   = BufReader::new(&__f);\

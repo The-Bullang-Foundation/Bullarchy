@@ -89,6 +89,24 @@ pub fn is_known_builtin(name: &str) -> bool {
     false
 }
 
+// ── Hoisted imports ────────────────────────────────────────────────────────────
+
+/// Rust `use` lines a builtin needs at file scope, for backends where the
+/// emitted expression itself no longer inlines them (currently just Rust —
+/// see codegen::collect_rust_imports, which hoists these to the top of the
+/// generated file instead of repeating them at every call site).
+pub fn required_imports(name: &str, backend: &Backend) -> Vec<&'static str> {
+    if !matches!(backend, Backend::Rust) {
+        return Vec::new();
+    }
+    match name {
+        "in"  => vec!["use std::io::{BufRead, BufReader};", "use std::os::unix::io::FromRawFd;"],
+        "out" => vec!["use std::io::Write;", "use std::os::unix::io::FromRawFd;", "use std::mem::ManuallyDrop;"],
+        "open" => vec!["use std::os::unix::io::IntoRawFd;"],
+        _ => Vec::new(),
+    }
+}
+
 // ── Dispatch ──────────────────────────────────────────────────────────────────
 
 pub fn emit_builtin(name: &str, params: &[Param], backend: &Backend) -> Result<String, String> {
