@@ -4,6 +4,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -11,7 +12,7 @@ func buildConvertPanel(bin string) fyne.CanvasObject {
 	targetEntry := widget.NewEntry()
 	targetEntry.SetPlaceHolder("./my_project  or  ./file.bu")
 
-	targetBrowse := widget.NewButton("Browse", func() {
+	folderBrowse := widget.NewButton("Folder…", func() {
 		d := dialog.NewFolderOpen(func(uri fyne.ListableURI, err error) {
 			if err != nil || uri == nil {
 				return
@@ -20,6 +21,20 @@ func buildConvertPanel(bin string) fyne.CanvasObject {
 		}, fyne.CurrentApp().Driver().AllWindows()[0])
 		d.Show()
 	})
+
+	fileBrowse := widget.NewButton("File…", func() {
+		d := dialog.NewFileOpen(func(uc fyne.URIReadCloser, err error) {
+			if err != nil || uc == nil {
+				return
+			}
+			targetEntry.SetText(uc.URI().Path())
+			uc.Close()
+		}, fyne.CurrentApp().Driver().AllWindows()[0])
+		d.SetFilter(storage.NewExtensionFileFilter([]string{".bu"}))
+		d.Show()
+	})
+
+	targetBrowse := container.NewHBox(folderBrowse, fileBrowse)
 
 	// Language dropdown — explicit list so Java is clearly visible
 	langSelect := widget.NewSelect(
