@@ -30,7 +30,11 @@ pub fn emit_source_cpp(file: &SourceFile, header_name: &str) -> String {
 pub fn emit_bare_cpp(file: &SourceFile) -> String {
     let mut out = String::new();
     for func in &file.bullets {
-        out.push_str(&emit_function_cpp(func));
+        if func.name == "main" {
+            out.push_str(&emit_main_function_cpp(func));
+        } else {
+            out.push_str(&emit_function_cpp(func));
+        }
         out.push('\n');
     }
     out

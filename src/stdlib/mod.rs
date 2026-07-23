@@ -107,6 +107,18 @@ pub fn required_imports(name: &str, backend: &Backend) -> Vec<&'static str> {
     }
 }
 
+/// C/C++ `#include` lines a builtin needs at file scope, for backends where
+/// the emitted expression calls a stdlib function instead of hand-rolling
+/// the logic (e.g. `toupper()` needs `<ctype.h>`). Hoisted once to the top
+/// of the file by codegen_c::collect_c_includes / codegen_cpp's equivalent,
+/// same pattern as required_imports above for Rust.
+pub fn required_includes(name: &str, backend: &Backend) -> Vec<&'static str> {
+    match (name, backend) {
+        ("to_upper", Backend::C) => vec!["#include <ctype.h>"],
+        _ => Vec::new(),
+    }
+}
+
 // ── Dispatch ──────────────────────────────────────────────────────────────────
 
 pub fn emit_builtin(name: &str, params: &[Param], backend: &Backend) -> Result<String, String> {

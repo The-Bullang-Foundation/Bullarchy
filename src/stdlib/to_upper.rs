@@ -11,7 +11,10 @@ pub fn emit(params: &[Param], backend: &Backend) -> Result<String, String> {
     Ok(match backend {
         Backend::Rust    => format!("{}.to_uppercase()", p[0]),
         Backend::Python  => format!("{}.upper()", super::py_esc(p[0])),
-        Backend::C       => format!("/* to_upper: iterate with toupper() over {} */", p[0]),
+        Backend::C       => format!(
+            "({{ for (char *__p = {0}; *__p; __p++) *__p = (char)toupper((unsigned char)*__p); {0}; }})",
+            p[0]
+        ),
         Backend::Cpp     => format!(
             "[&](){{ std::string _s({0}); \
              std::transform(_s.begin(),_s.end(),_s.begin(),::toupper); return _s; }}()",

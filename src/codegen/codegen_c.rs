@@ -5,6 +5,46 @@
 //! and a Makefile to compile the project.
 
 use bullang::ast::*;
+use crate::stdlib;
+use std::collections::BTreeSet;
+
+// ── Hoisted includes ─────────────────────────────────────────────────────────
+
+/// Walk every bullet in `file` and collect the `#include` lines required by
+/// any stdlib builtins referenced in pipe bodies (e.g. `builtin::to_upper`
+/// needing `<ctype.h>`), deduplicated and in a stable order — mirrors
+/// codegen::collect_rust_imports for the Rust backend.
+fn collect_c_includes(file: &SourceFile) -> Vec<&'static str> {
+    let mut names: BTreeSet<&str> = BTreeSet::new();
+    for func in &file.bullets {
+        collect_builtin_names_c(&func.body, &mut names);
+    }
+
+    let mut includes: BTreeSet<&'static str> = BTreeSet::new();
+    for name in names {
+        for include in stdlib::required_includes(name, &Backend::C) {
+            includes.insert(include);
+        }
+    }
+    includes.into_iter().collect()
+}
+
+fn collect_builtin_names_c<'a>(body: &'a BulletBody, out: &mut BTreeSet<&'a str>) {
+    if let BulletBody::Pipes(pipes) = body {
+        for pipe in pipes {
+            if let Expr::Atom(Atom::BuiltinNoArgs(name)) = &pipe.expr {
+                out.insert(name.as_str());
+            }
+        }
+    }
+}
+
+fn emit_c_includes(out: &mut String, file: &SourceFile) {
+    for include in collect_c_includes(file) {
+        out.push_str(include);
+        out.push('\n');
+    }
+}
 
 // ── Source file → C ───────────────────────────────────────────────────────────
 
@@ -17,6 +57,7 @@ pub fn emit_source_c(file: &SourceFile, header_name: &str) -> String {
     if needs_string_h(file) {
         out.push_str("#include <string.h>\n");
     }
+    emit_c_includes(&mut out, file);
     if out.ends_with('\n') && !out.ends_with("\n\n") {
         out.push('\n');
     }
@@ -30,12 +71,24 @@ pub fn emit_source_c(file: &SourceFile, header_name: &str) -> String {
 
 /// Single-file mode: emit a self-contained `.c` with no companion `.h`.
 /// Includes and forward declarations are inlined at the top.
-/// Bare single-file mode: only the function bodies, no includes, no forward
-/// declarations, no preamble of any kind.
+/// Bare single-file mode: only the function bodies plus any hoisted builtin
+/// includes — no forward declarations, no other preamble.
 pub fn emit_bare_c(file: &SourceFile) -> String {
     let mut out = String::new();
+    let includes = collect_c_includes(file);
+    for include in &includes {
+        out.push_str(include);
+        out.push('\n');
+    }
+    if !includes.is_empty() {
+        out.push('\n');
+    }
     for func in &file.bullets {
-        out.push_str(&emit_function_c(func));
+        if func.name == "main" {
+            out.push_str(&emit_main_function_c(func));
+        } else {
+            out.push_str(&emit_function_c(func));
+        }
         out.push('\n');
     }
     out
@@ -233,6 +286,7 @@ pub fn emit_main_c(file: &SourceFile, header_name: &str) -> String {
     if needs_stdlib(file) {
         out.push_str("#include <stdlib.h>\n");
     }
+    emit_c_includes(&mut out, file);
     out.push_str(&format!("#include \"{}\"\n\n", header_name));
 
     for func in &file.bullets {
@@ -461,7 +515,7 @@ pub fn emit_body_c(out: &mut String, body: &BulletBody, params: &[Param], backen
                 } else {
                     let base = emit_expr_c(&pipe.expr);
                     let inputs_str = pipe.inputs.iter()
-                        .map(emit_expr_c)
+                        .map(emit_call_arg_c)
                         .collect::<Vec<_>>()
                         .join(", ");
                     if inputs_str.is_empty() {
@@ -536,6 +590,25 @@ pub fn emit_expr_c(expr: &Expr) -> String {
                 .collect();
             format!("({{{}}})", fields.join(", "))
         }
+    }
+}
+
+/// Emit a function-call argument. String literals are wrapped as a
+/// compound literal `(char[]){"..."}` instead of a bare `"..."`.
+///
+/// Bullang strings are plain `char*` throughout the C backend, and several
+/// builtins (e.g. `to_upper`) mutate their argument in place rather than
+/// allocating a copy — cheap, but it means a bare string literal, which
+/// points into read-only `.rodata`, crashes the moment it's written to.
+/// `(char[]){"..."}` is a stack-allocated, mutable array with automatic
+/// storage duration scoped to the enclosing block — no heap allocation,
+/// and safe as long as the result doesn't outlive that block (the same
+/// rule that already applies to any pointer into a C stack frame).
+fn emit_call_arg_c(expr: &Expr) -> String {
+    if let Expr::Atom(Atom::StringLit(s)) = expr {
+        format!("(char[]){{\"{}\"}}", s)
+    } else {
+        emit_expr_c(expr)
     }
 }
 
