@@ -6,6 +6,57 @@
 
 use bullang::ast::*;
 use crate::codegen::codegen_c;
+use crate::stdlib;
+use std::collections::BTreeSet;
+
+// ── Hoisted includes / helper functions ─────────────────────────────────────
+
+/// Same pattern as codegen_c::collect_c_includes, for the C++ backend.
+fn collect_cpp_includes(file: &SourceFile) -> Vec<&'static str> {
+    let mut names: BTreeSet<&str> = BTreeSet::new();
+    for func in &file.bullets {
+        codegen_c::collect_builtin_names_c(&func.body, &mut names);
+    }
+    let mut includes: BTreeSet<&'static str> = BTreeSet::new();
+    for name in names {
+        for include in stdlib::required_includes(name, &Backend::Cpp) {
+            includes.insert(include);
+        }
+    }
+    includes.into_iter().collect()
+}
+
+/// Same pattern as codegen_c::collect_c_helpers, for the C++ backend.
+/// Helpers are free functions (not namespace-scoped) so a caller inside
+/// `namespace ns { ... }` still resolves them via normal unqualified
+/// lookup up into the enclosing (global) scope.
+fn collect_cpp_helpers(file: &SourceFile) -> Vec<&'static str> {
+    let mut names: BTreeSet<&str> = BTreeSet::new();
+    for func in &file.bullets {
+        codegen_c::collect_builtin_names_c(&func.body, &mut names);
+    }
+    let mut helpers: BTreeSet<&'static str> = BTreeSet::new();
+    for name in names {
+        if let Some(def) = stdlib::helper_definition(name, &Backend::Cpp) {
+            helpers.insert(def);
+        }
+    }
+    helpers.into_iter().collect()
+}
+
+fn emit_cpp_includes(out: &mut String, file: &SourceFile) {
+    for include in collect_cpp_includes(file) {
+        out.push_str(include);
+        out.push('\n');
+    }
+}
+
+fn emit_cpp_helpers(out: &mut String, file: &SourceFile) {
+    for helper in collect_cpp_helpers(file) {
+        out.push_str(helper);
+        out.push('\n');
+    }
+}
 
 // ── Source file → C++ ────────────────────────────────────────────────────────
 
@@ -13,7 +64,10 @@ pub fn emit_source_cpp(file: &SourceFile, header_name: &str) -> String {
     let mut out = String::new();
     out.push_str(&format!("#include \"{}\"\n", header_name));
     out.push_str("#include <cstdlib>\n");
-    out.push_str("#include <cstring>\n\n");
+    out.push_str("#include <cstring>\n");
+    emit_cpp_includes(&mut out, file);
+    out.push('\n');
+    emit_cpp_helpers(&mut out, file);
 
     let ns = header_name.trim_end_matches(".hpp");
     out.push_str(&format!("namespace {} {{\n\n", ns));
@@ -26,9 +80,19 @@ pub fn emit_source_cpp(file: &SourceFile, header_name: &str) -> String {
 }
 
 /// Single-file mode: emit a self-contained `.cpp` with no companion `.hpp`.
-/// Bare single-file mode: only the function bodies, no includes, no preamble.
+/// Bare single-file mode: only the function bodies plus any hoisted builtin
+/// includes/helpers — no other preamble.
 pub fn emit_bare_cpp(file: &SourceFile) -> String {
     let mut out = String::new();
+    let includes = collect_cpp_includes(file);
+    for include in &includes {
+        out.push_str(include);
+        out.push('\n');
+    }
+    if !includes.is_empty() {
+        out.push('\n');
+    }
+    emit_cpp_helpers(&mut out, file);
     for func in &file.bullets {
         if func.name == "main" {
             out.push_str(&emit_main_function_cpp(func));
@@ -141,8 +205,10 @@ pub fn emit_header_cpp(
 pub fn emit_main_cpp(file: &SourceFile, header_name: &str, namespace: &str) -> String {
     let mut out = String::new();
     out.push_str("#include <iostream>\n");
+    emit_cpp_includes(&mut out, file);
     out.push_str(&format!("#include \"{}\"\n", header_name));
     out.push_str(&format!("using namespace {};\n\n", namespace));
+    emit_cpp_helpers(&mut out, file);
 
     for func in &file.bullets {
         if func.name == "main" {

@@ -114,8 +114,75 @@ pub fn required_imports(name: &str, backend: &Backend) -> Vec<&'static str> {
 /// same pattern as required_imports above for Rust.
 pub fn required_includes(name: &str, backend: &Backend) -> Vec<&'static str> {
     match (name, backend) {
-        ("to_upper", Backend::C) => vec!["#include <ctype.h>"],
+        ("to_upper", Backend::C) | ("to_lower", Backend::C) => vec!["#include <ctype.h>"],
+        ("trim", Backend::C) => vec!["#include <ctype.h>", "#include <string.h>"],
+        ("to_upper", Backend::Cpp) | ("to_lower", Backend::Cpp) => vec!["#include <algorithm>", "#include <cctype>", "#include <string>"],
+        ("trim", Backend::Cpp) => vec!["#include <string>"],
         _ => Vec::new(),
+    }
+}
+
+// ── Hoisted helper functions ─────────────────────────────────────────────────
+
+/// Standalone top-level C/C++ function a builtin needs defined once at file
+/// scope — `static` linkage so it's safe to drop into every generated file
+/// that uses it without risking a duplicate-symbol link error. Hoisted
+/// above the user's own functions by codegen_c::collect_c_helpers /
+/// codegen_cpp's equivalent, same call site the builtin's `emit()` then
+/// reduces to a plain `name(args)` call instead of inlining the logic
+/// (a GNU statement-expression in C, an IIFE lambda in C++).
+pub fn helper_definition(name: &str, backend: &Backend) -> Option<&'static str> {
+    match (name, backend) {
+        ("to_upper", Backend::C) => Some(
+            "static char *to_upper(char *str) {\n\
+             \tfor (int i = 0; str[i]; i++) {\n\
+             \t\tstr[i] = (char)toupper((unsigned char)str[i]);\n\
+             \t}\n\
+             \treturn (str);\n\
+             }\n"
+        ),
+        ("to_lower", Backend::C) => Some(
+            "static char *to_lower(char *str) {\n\
+             \tfor (int i = 0; str[i]; i++) {\n\
+             \t\tstr[i] = (char)tolower((unsigned char)str[i]);\n\
+             \t}\n\
+             \treturn (str);\n\
+             }\n"
+        ),
+        ("trim", Backend::C) => Some(
+            "static char *trim(char *str) {\n\
+             \tint start = 0;\n\
+             \twhile (str[start] && isspace((unsigned char)str[start])) {\n\
+             \t\tstart++;\n\
+             \t}\n\
+             \tint end = (int)strlen(str);\n\
+             \twhile (end > start && isspace((unsigned char)str[end - 1])) {\n\
+             \t\tend--;\n\
+             \t}\n\
+             \tstr[end] = '\\0';\n\
+             \treturn (str + start);\n\
+             }\n"
+        ),
+        ("to_upper", Backend::Cpp) => Some(
+            "static std::string to_upper(std::string str) {\n\
+             \tstd::transform(str.begin(), str.end(), str.begin(), ::toupper);\n\
+             \treturn (str);\n\
+             }\n"
+        ),
+        ("to_lower", Backend::Cpp) => Some(
+            "static std::string to_lower(std::string str) {\n\
+             \tstd::transform(str.begin(), str.end(), str.begin(), ::tolower);\n\
+             \treturn (str);\n\
+             }\n"
+        ),
+        ("trim", Backend::Cpp) => Some(
+            "static std::string trim(std::string str) {\n\
+             \tstr.erase(0, str.find_first_not_of(\" \\t\\n\\r\"));\n\
+             \tstr.erase(str.find_last_not_of(\" \\t\\n\\r\") + 1);\n\
+             \treturn (str);\n\
+             }\n"
+        ),
+        _ => None,
     }
 }
 

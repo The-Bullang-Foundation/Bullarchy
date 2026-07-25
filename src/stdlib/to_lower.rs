@@ -11,12 +11,8 @@ pub fn emit(params: &[Param], backend: &Backend) -> Result<String, String> {
     Ok(match backend {
         Backend::Rust    => format!("{}.to_lowercase()", p[0]),
         Backend::Python  => format!("{}.lower()", super::py_esc(p[0])),
-        Backend::C       => format!("/* to_lower: iterate with tolower() over {} */", p[0]),
-        Backend::Cpp     => format!(
-            "[&](){{ std::string _s({0}); \
-             std::transform(_s.begin(),_s.end(),_s.begin(),::tolower); return _s; }}()",
-            p[0]
-        ),
+        Backend::C       => format!("to_lower({})", p[0]),
+        Backend::Cpp     => format!("to_lower({})", p[0]),
         Backend::Go      => format!("strings.ToLower({})", p[0]),
         Backend::Java    => format!("{}.toLowerCase()", p[0]),
         Backend::Unknown(kw) => return Err(format!(

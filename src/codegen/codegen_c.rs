@@ -29,7 +29,7 @@ fn collect_c_includes(file: &SourceFile) -> Vec<&'static str> {
     includes.into_iter().collect()
 }
 
-fn collect_builtin_names_c<'a>(body: &'a BulletBody, out: &mut BTreeSet<&'a str>) {
+pub(crate) fn collect_builtin_names_c<'a>(body: &'a BulletBody, out: &mut BTreeSet<&'a str>) {
     if let BulletBody::Pipes(pipes) = body {
         for pipe in pipes {
             if let Expr::Atom(Atom::BuiltinNoArgs(name)) = &pipe.expr {
@@ -42,6 +42,36 @@ fn collect_builtin_names_c<'a>(body: &'a BulletBody, out: &mut BTreeSet<&'a str>
 fn emit_c_includes(out: &mut String, file: &SourceFile) {
     for include in collect_c_includes(file) {
         out.push_str(include);
+        out.push('\n');
+    }
+}
+
+// ── Hoisted helper functions ────────────────────────────────────────────────
+
+/// Walk every bullet in `file` and collect the standalone helper-function
+/// definitions required by any stdlib builtins referenced in pipe bodies
+/// (e.g. `builtin::to_upper` needing a top-level `to_upper()` function),
+/// deduplicated and in a stable order. Emitted once, above every user
+/// function — including `main` — since C requires definition-before-use.
+fn collect_c_helpers(file: &SourceFile) -> Vec<&'static str> {
+    let mut names: BTreeSet<&str> = BTreeSet::new();
+    for func in &file.bullets {
+        collect_builtin_names_c(&func.body, &mut names);
+    }
+
+    let mut helpers: BTreeSet<&'static str> = BTreeSet::new();
+    for name in names {
+        if let Some(def) = stdlib::helper_definition(name, &Backend::C) {
+            helpers.insert(def);
+        }
+    }
+    helpers.into_iter().collect()
+}
+
+fn emit_c_helpers(out: &mut String, file: &SourceFile) {
+    let helpers = collect_c_helpers(file);
+    for helper in &helpers {
+        out.push_str(helper);
         out.push('\n');
     }
 }
@@ -61,6 +91,7 @@ pub fn emit_source_c(file: &SourceFile, header_name: &str) -> String {
     if out.ends_with('\n') && !out.ends_with("\n\n") {
         out.push('\n');
     }
+    emit_c_helpers(&mut out, file);
 
     for func in &file.bullets {
         out.push_str(&emit_function_c(func));
@@ -72,7 +103,7 @@ pub fn emit_source_c(file: &SourceFile, header_name: &str) -> String {
 /// Single-file mode: emit a self-contained `.c` with no companion `.h`.
 /// Includes and forward declarations are inlined at the top.
 /// Bare single-file mode: only the function bodies plus any hoisted builtin
-/// includes — no forward declarations, no other preamble.
+/// includes/helpers — no forward declarations, no other preamble.
 pub fn emit_bare_c(file: &SourceFile) -> String {
     let mut out = String::new();
     let includes = collect_c_includes(file);
@@ -83,6 +114,7 @@ pub fn emit_bare_c(file: &SourceFile) -> String {
     if !includes.is_empty() {
         out.push('\n');
     }
+    emit_c_helpers(&mut out, file);
     for func in &file.bullets {
         if func.name == "main" {
             out.push_str(&emit_main_function_c(func));
@@ -288,6 +320,7 @@ pub fn emit_main_c(file: &SourceFile, header_name: &str) -> String {
     }
     emit_c_includes(&mut out, file);
     out.push_str(&format!("#include \"{}\"\n\n", header_name));
+    emit_c_helpers(&mut out, file);
 
     for func in &file.bullets {
         if func.name == "main" {
