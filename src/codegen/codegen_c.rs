@@ -76,6 +76,39 @@ fn emit_c_helpers(out: &mut String, file: &SourceFile) {
     }
 }
 
+// ── Void-returning callee detection ─────────────────────────────────────────
+
+/// True if `ty` is Bullang's unit type `()`.
+fn type_is_unit(ty: &BuType) -> bool {
+    matches!(ty, BuType::Named(s) if s == "()")
+}
+
+/// True if `func`'s declared Bullang return type is unit (including no
+/// declared output at all, which defaults to unit).
+fn output_is_unit(func: &Bullet) -> bool {
+    match &func.output {
+        None    => true,
+        Some(o) => type_is_unit(&o.ty),
+    }
+}
+
+/// Names of every unit-returning function declared in `file`. A pipe that
+/// calls one of these (e.g. `shout(...)` where `shout` itself ends in a
+/// `builtin::out` call) compiles to a `void` C function — trying to bind
+/// its result with `__auto_type x = shout(...);` doesn't compile, so the
+/// call must be emitted as a bare statement instead.
+///
+/// Scoped to functions declared in the SAME file: in the multi-file project
+/// build, a caller in main.bu invoking a unit-returning function defined in
+/// a different .bu module won't be caught by this — that cross-file case
+/// isn't covered yet.
+pub(crate) fn collect_unit_functions(file: &SourceFile) -> BTreeSet<&str> {
+    file.bullets.iter()
+        .filter(|f| output_is_unit(f))
+        .map(|f| f.name.as_str())
+        .collect()
+}
+
 // ── Source file → C ───────────────────────────────────────────────────────────
 
 pub fn emit_source_c(file: &SourceFile, header_name: &str) -> String {
@@ -93,8 +126,9 @@ pub fn emit_source_c(file: &SourceFile, header_name: &str) -> String {
     }
     emit_c_helpers(&mut out, file);
 
+    let unit_fns = collect_unit_functions(file);
     for func in &file.bullets {
-        out.push_str(&emit_function_c(func));
+        out.push_str(&emit_function_c(func, &unit_fns));
         out.push('\n');
     }
     out
@@ -115,11 +149,12 @@ pub fn emit_bare_c(file: &SourceFile) -> String {
         out.push('\n');
     }
     emit_c_helpers(&mut out, file);
+    let unit_fns = collect_unit_functions(file);
     for func in &file.bullets {
         if func.name == "main" {
-            out.push_str(&emit_main_function_c(func));
+            out.push_str(&emit_main_function_c(func, &unit_fns));
         } else {
-            out.push_str(&emit_function_c(func));
+            out.push_str(&emit_function_c(func, &unit_fns));
         }
         out.push('\n');
     }
@@ -322,11 +357,12 @@ pub fn emit_main_c(file: &SourceFile, header_name: &str) -> String {
     out.push_str(&format!("#include \"{}\"\n\n", header_name));
     emit_c_helpers(&mut out, file);
 
+    let unit_fns = collect_unit_functions(file);
     for func in &file.bullets {
         if func.name == "main" {
-            out.push_str(&emit_main_function_c(func));
+            out.push_str(&emit_main_function_c(func, &unit_fns));
         } else {
-            out.push_str(&emit_function_c(func));
+            out.push_str(&emit_function_c(func, &unit_fns));
         }
         out.push('\n');
     }
@@ -372,14 +408,14 @@ pub fn emit_makefile(
 
 // ── Function emitters ─────────────────────────────────────────────────────────
 
-fn emit_function_c(func: &Bullet) -> String {
+fn emit_function_c(func: &Bullet, unit_fns: &BTreeSet<&str>) -> String {
     let mut out = String::new();
 
     if func.type_params.is_empty() {
         let params = c_param_list(&func.params);
         let ret    = bu_type_to_c(&func.output.as_ref().map(|o| &o.ty).unwrap_or(&bullang::ast::BuType::Named("()".to_string())));
         out.push_str(&format!("{} {}({}) {{\n", ret, func.name, params));
-        emit_body_c(&mut out, &func.body, &func.params, &Backend::C, ret == "void");
+        emit_body_c(&mut out, &func.body, &func.params, &Backend::C, ret == "void", unit_fns);
     } else {
         // Generic function — type params become BuVal.
         out.push_str("#include \"bu_generic.h\"\n");
@@ -509,22 +545,23 @@ fn emit_atom_c_generic(atom: &Atom, tp: &[String]) -> String {
     }
 }
 
-fn emit_main_function_c(func: &Bullet) -> String {
+fn emit_main_function_c(func: &Bullet, unit_fns: &BTreeSet<&str>) -> String {
     let mut out = String::new();
     out.push_str("int main(void) {\n");
-    emit_body_c(&mut out, &func.body, &func.params, &Backend::C, true);
+    emit_body_c(&mut out, &func.body, &func.params, &Backend::C, true, unit_fns);
     // If body doesn't have a return, add one
     out.push_str("    return 0;\n");
     out.push_str("}\n");
     out
 }
 
-pub fn emit_body_c(out: &mut String, body: &BulletBody, params: &[Param], backend: &Backend, returns_unit: bool) {
+pub fn emit_body_c(out: &mut String, body: &BulletBody, params: &[Param], backend: &Backend, returns_unit: bool, unit_fns: &BTreeSet<&str>) {
     match body {
         BulletBody::Pipes(pipes) => {
             if pipes.is_empty() { return; }
             let last = pipes.len().saturating_sub(1);
             for (i, pipe) in pipes.iter().enumerate() {
+                let mut callee_is_unit = false;
                 // Handle builtin::name with implicit pipe inputs
                 let expr_str = if let Expr::Atom(Atom::BuiltinNoArgs(name)) = &pipe.expr {
                     let synthetic_params: Vec<bullang::ast::Param> = pipe.inputs
@@ -546,6 +583,13 @@ pub fn emit_body_c(out: &mut String, body: &BulletBody, params: &[Param], backen
                         Err(e)   => format!("/* ERROR: {e} */"),
                     }
                 } else {
+                    let callee_name = match &pipe.expr {
+                        Expr::Atom(Atom::Ident(n))          => Some(n.as_str()),
+                        Expr::Atom(Atom::Call { name, .. }) => Some(name.as_str()),
+                        _ => None,
+                    };
+                    callee_is_unit = callee_name.is_some_and(|n| unit_fns.contains(n));
+
                     let base = emit_expr_c(&pipe.expr);
                     let inputs_str = pipe.inputs.iter()
                         .map(emit_call_arg_c)
@@ -569,6 +613,12 @@ pub fn emit_body_c(out: &mut String, body: &BulletBody, params: &[Param], backen
                 // relationship to the required `int` return type at all.
                 if i == last && !returns_unit {
                     out.push_str(&format!("    return {};\n", expr_str));
+                } else if callee_is_unit {
+                    // The callee itself compiles to a `void` C function
+                    // (its own last pipe is unit-returning too, e.g. it
+                    // ends in `builtin::out`) — there's nothing to bind,
+                    // and `__auto_type x = void_call();` doesn't compile.
+                    out.push_str(&format!("    {};\n", expr_str));
                 } else {
                     let binding = pipe.binding.as_deref().unwrap_or("_");
                     out.push_str(&format!("    __auto_type {} = {};\n", binding, expr_str));

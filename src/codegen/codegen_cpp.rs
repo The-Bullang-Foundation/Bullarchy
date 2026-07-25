@@ -69,10 +69,11 @@ pub fn emit_source_cpp(file: &SourceFile, header_name: &str) -> String {
     out.push('\n');
     emit_cpp_helpers(&mut out, file);
 
+    let unit_fns = codegen_c::collect_unit_functions(file);
     let ns = header_name.trim_end_matches(".hpp");
     out.push_str(&format!("namespace {} {{\n\n", ns));
     for func in &file.bullets {
-        out.push_str(&emit_function_cpp(func));
+        out.push_str(&emit_function_cpp(func, &unit_fns));
         out.push('\n');
     }
     out.push_str(&format!("}} // namespace {}\n", ns));
@@ -93,11 +94,12 @@ pub fn emit_bare_cpp(file: &SourceFile) -> String {
         out.push('\n');
     }
     emit_cpp_helpers(&mut out, file);
+    let unit_fns = codegen_c::collect_unit_functions(file);
     for func in &file.bullets {
         if func.name == "main" {
-            out.push_str(&emit_main_function_cpp(func));
+            out.push_str(&emit_main_function_cpp(func, &unit_fns));
         } else {
-            out.push_str(&emit_function_cpp(func));
+            out.push_str(&emit_function_cpp(func, &unit_fns));
         }
         out.push('\n');
     }
@@ -210,11 +212,12 @@ pub fn emit_main_cpp(file: &SourceFile, header_name: &str, namespace: &str) -> S
     out.push_str(&format!("using namespace {};\n\n", namespace));
     emit_cpp_helpers(&mut out, file);
 
+    let unit_fns = codegen_c::collect_unit_functions(file);
     for func in &file.bullets {
         if func.name == "main" {
-            out.push_str(&emit_main_function_cpp(func));
+            out.push_str(&emit_main_function_cpp(func, &unit_fns));
         } else {
-            out.push_str(&emit_function_cpp(func));
+            out.push_str(&emit_function_cpp(func, &unit_fns));
         }
         out.push('\n');
     }
@@ -258,7 +261,7 @@ pub fn emit_makefile_cpp(
 
 // ── Function emitters ─────────────────────────────────────────────────────────
 
-fn emit_function_cpp(func: &Bullet) -> String {
+fn emit_function_cpp(func: &Bullet, unit_fns: &BTreeSet<&str>) -> String {
     let mut out   = String::new();
     let params    = cpp_param_list(&func.params);
     let ret       = bu_type_to_cpp(&func.output.as_ref().map(|o| &o.ty).unwrap_or(&bullang::ast::BuType::Named("()".to_string())));
@@ -271,15 +274,15 @@ fn emit_function_cpp(func: &Bullet) -> String {
     }
 
     out.push_str(&format!("{} {}({}) {{\n", ret, func.name, params));
-    emit_body_cpp(&mut out, &func.body, &func.params, ret == "void");
+    emit_body_cpp(&mut out, &func.body, &func.params, ret == "void", unit_fns);
     out.push_str("}\n");
     out
 }
 
-fn emit_main_function_cpp(func: &Bullet) -> String {
+fn emit_main_function_cpp(func: &Bullet, unit_fns: &BTreeSet<&str>) -> String {
     let mut out = String::new();
     out.push_str("int main() {\n");
-    emit_body_cpp(&mut out, &func.body, &func.params, true);
+    emit_body_cpp(&mut out, &func.body, &func.params, true, unit_fns);
     out.push_str("    return 0;\n");
     out.push_str("}\n");
     out
@@ -319,12 +322,13 @@ fn emit_atom_cpp(atom: &Atom) -> String {
     }
 }
 
-fn emit_body_cpp(out: &mut String, body: &BulletBody, params: &[Param], returns_unit: bool) {
+fn emit_body_cpp(out: &mut String, body: &BulletBody, params: &[Param], returns_unit: bool, unit_fns: &BTreeSet<&str>) {
     match body {
         BulletBody::Pipes(pipes) => {
             if pipes.is_empty() { return; }
             let last = pipes.len().saturating_sub(1);
             for (i, pipe) in pipes.iter().enumerate() {
+                let mut callee_is_unit = false;
                 // Handle builtin::name with implicit pipe inputs
                 let expr_str = if let Expr::Atom(Atom::BuiltinNoArgs(name)) = &pipe.expr {
                     let synthetic_params: Vec<bullang::ast::Param> = pipe.inputs
@@ -346,6 +350,13 @@ fn emit_body_cpp(out: &mut String, body: &BulletBody, params: &[Param], returns_
                         Err(e)   => format!("/* ERROR: {e} */"),
                     }
                 } else {
+                    let callee_name = match &pipe.expr {
+                        Expr::Atom(Atom::Ident(n))          => Some(n.as_str()),
+                        Expr::Atom(Atom::Call { name, .. }) => Some(name.as_str()),
+                        _ => None,
+                    };
+                    callee_is_unit = callee_name.is_some_and(|n| unit_fns.contains(n));
+
                     let base = emit_expr_cpp(&pipe.expr);
                     let inputs_str = pipe.inputs.iter()
                         .map(emit_expr_cpp)
@@ -366,6 +377,10 @@ fn emit_body_cpp(out: &mut String, body: &BulletBody, params: &[Param], returns_
                 // turn their last pipe into `return expr;`.
                 if i == last && !returns_unit {
                     out.push_str(&format!("    return {};\n", expr_str));
+                } else if callee_is_unit {
+                    // See codegen_c::emit_body_c — the callee compiles to a
+                    // `void` function, so there's nothing to bind.
+                    out.push_str(&format!("    {};\n", expr_str));
                 } else {
                     let binding = pipe.binding.as_deref().unwrap_or("_");
                     out.push_str(&format!("    auto {} = {};\n", binding, expr_str));
