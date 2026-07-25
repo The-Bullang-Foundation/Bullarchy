@@ -271,7 +271,7 @@ fn emit_function_cpp(func: &Bullet) -> String {
     }
 
     out.push_str(&format!("{} {}({}) {{\n", ret, func.name, params));
-    emit_body_cpp(&mut out, &func.body, &func.params);
+    emit_body_cpp(&mut out, &func.body, &func.params, ret == "void");
     out.push_str("}\n");
     out
 }
@@ -279,7 +279,7 @@ fn emit_function_cpp(func: &Bullet) -> String {
 fn emit_main_function_cpp(func: &Bullet) -> String {
     let mut out = String::new();
     out.push_str("int main() {\n");
-    emit_body_cpp(&mut out, &func.body, &func.params);
+    emit_body_cpp(&mut out, &func.body, &func.params, true);
     out.push_str("    return 0;\n");
     out.push_str("}\n");
     out
@@ -319,7 +319,7 @@ fn emit_atom_cpp(atom: &Atom) -> String {
     }
 }
 
-fn emit_body_cpp(out: &mut String, body: &BulletBody, params: &[Param]) {
+fn emit_body_cpp(out: &mut String, body: &BulletBody, params: &[Param], returns_unit: bool) {
     match body {
         BulletBody::Pipes(pipes) => {
             if pipes.is_empty() { return; }
@@ -360,15 +360,24 @@ fn emit_body_cpp(out: &mut String, body: &BulletBody, params: &[Param]) {
                         }
                     }
                 };
-                if i == last {
+                // See codegen_c::emit_body_c for why unit-returning functions
+                // (including main, whose C++ signature is forced to `int`
+                // regardless of its Bullang-level `()` return type) never
+                // turn their last pipe into `return expr;`.
+                if i == last && !returns_unit {
                     out.push_str(&format!("    return {};\n", expr_str));
                 } else {
-                    out.push_str(&format!("    auto {} = {};\n", pipe.binding.as_deref().unwrap_or("_"), expr_str));
+                    let binding = pipe.binding.as_deref().unwrap_or("_");
+                    out.push_str(&format!("    auto {} = {};\n", binding, expr_str));
+                    // See codegen_c::emit_body_c for why every binding gets
+                    // (void)-marked regardless of whether it's referenced
+                    // again downstream.
+                    out.push_str(&format!("    (void){};\n", binding));
                     if pipe.propagate {
                         // C++ std::optional — if nullopt, return nullopt
                         out.push_str(&format!(
                             "    if (!{}) {{ return std::nullopt; }}\n",
-                            pipe.binding.as_deref().unwrap_or("_")
+                            binding
                         ));
                     }
                 }

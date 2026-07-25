@@ -379,7 +379,7 @@ fn emit_function_c(func: &Bullet) -> String {
         let params = c_param_list(&func.params);
         let ret    = bu_type_to_c(&func.output.as_ref().map(|o| &o.ty).unwrap_or(&bullang::ast::BuType::Named("()".to_string())));
         out.push_str(&format!("{} {}({}) {{\n", ret, func.name, params));
-        emit_body_c(&mut out, &func.body, &func.params, &Backend::C);
+        emit_body_c(&mut out, &func.body, &func.params, &Backend::C, ret == "void");
     } else {
         // Generic function — type params become BuVal.
         out.push_str("#include \"bu_generic.h\"\n");
@@ -512,14 +512,14 @@ fn emit_atom_c_generic(atom: &Atom, tp: &[String]) -> String {
 fn emit_main_function_c(func: &Bullet) -> String {
     let mut out = String::new();
     out.push_str("int main(void) {\n");
-    emit_body_c(&mut out, &func.body, &func.params, &Backend::C);
+    emit_body_c(&mut out, &func.body, &func.params, &Backend::C, true);
     // If body doesn't have a return, add one
     out.push_str("    return 0;\n");
     out.push_str("}\n");
     out
 }
 
-pub fn emit_body_c(out: &mut String, body: &BulletBody, params: &[Param], backend: &Backend) {
+pub fn emit_body_c(out: &mut String, body: &BulletBody, params: &[Param], backend: &Backend, returns_unit: bool) {
     match body {
         BulletBody::Pipes(pipes) => {
             if pipes.is_empty() { return; }
@@ -560,14 +560,30 @@ pub fn emit_body_c(out: &mut String, body: &BulletBody, params: &[Param], backen
                         }
                     }
                 };
-                if i == last {
+                // A unit-returning function (Bullang `-> ()`, which includes
+                // `main` — its C signature is forced to `int` for a valid
+                // entry point, but its Bullang-level return type is still
+                // unit) never turns its last pipe into `return expr;`: the
+                // pipe's value isn't meaningful to the caller, and for
+                // `main` specifically the expression's C type has no
+                // relationship to the required `int` return type at all.
+                if i == last && !returns_unit {
                     out.push_str(&format!("    return {};\n", expr_str));
                 } else {
-                    out.push_str(&format!("    __auto_type {} = {};\n", pipe.binding.as_deref().unwrap_or("_"), expr_str));
+                    let binding = pipe.binding.as_deref().unwrap_or("_");
+                    out.push_str(&format!("    __auto_type {} = {};\n", binding, expr_str));
+                    // Whether `binding` gets referenced again depends on the
+                    // rest of the Bullang body, not on codegen — a binding
+                    // that's genuinely unused downstream (a call made only
+                    // for its side effect, or the discarded last pipe of a
+                    // unit-returning function) would otherwise trip
+                    // -Wunused-variable under -Werror. (void)-marking it is
+                    // a no-op when the binding IS used later.
+                    out.push_str(&format!("    (void){};\n", binding));
                     if pipe.propagate {
                         out.push_str(&format!(
                             "    if (!{}) {{ return NULL; }}\n",
-                            pipe.binding.as_deref().unwrap_or("_")
+                            binding
                         ));
                     }
                 }
