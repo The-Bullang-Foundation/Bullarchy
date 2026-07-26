@@ -116,10 +116,10 @@ pub fn required_includes(name: &str, backend: &Backend) -> Vec<&'static str> {
     match (name, backend) {
         ("to_upper", Backend::C) | ("to_lower", Backend::C) => vec!["#include <ctype.h>"],
         ("trim", Backend::C) => vec!["#include <ctype.h>", "#include <string.h>"],
-        ("out", Backend::C) => vec!["#include <stdint.h>", "#include <string.h>", "#include <unistd.h>"],
+        ("out", Backend::C) => vec!["#include <string.h>", "#include <unistd.h>"],
         ("to_upper", Backend::Cpp) | ("to_lower", Backend::Cpp) => vec!["#include <algorithm>", "#include <cctype>", "#include <string>"],
         ("trim", Backend::Cpp) => vec!["#include <string>"],
-        ("out", Backend::Cpp) => vec!["#include <cstdint>", "#include <string>", "#include <unistd.h>"],
+        ("out", Backend::Cpp) => vec!["#include <string>", "#include <unistd.h>"],
         _ => Vec::new(),
     }
 }

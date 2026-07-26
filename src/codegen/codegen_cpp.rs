@@ -384,14 +384,12 @@ fn emit_body_cpp(out: &mut String, body: &BulletBody, params: &[Param], returns_
                 // turn their last pipe into `return expr;`.
                 if i == last && !returns_unit {
                     out.push_str(&format!("    return {};\n", expr_str));
-                } else if callee_is_unit {
-                    // Void callee — bare statement, no cast to discard.
+                } else if callee_is_unit || pipe.binding.is_none() {
+                    // See codegen_c::emit_body_c — void callee, or an
+                    // explicit `-> {}` discard; either way, a bare
+                    // statement, relying on the builtin/function not
+                    // wrapping its result in an explicit cast.
                     out.push_str(&format!("    {};\n", expr_str));
-                } else if pipe.binding.is_none() {
-                    // See codegen_c::emit_body_c — explicit `-> {}` discard
-                    // of a non-void expression; (void) is the deliberate
-                    // discard idiom, not a blanket suppressor.
-                    out.push_str(&format!("    (void)({});\n", expr_str));
                 } else {
                     let binding = pipe.binding.as_deref().unwrap();
                     out.push_str(&format!("    auto {} = {};\n", binding, expr_str));

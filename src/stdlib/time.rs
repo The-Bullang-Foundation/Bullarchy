@@ -20,16 +20,15 @@ std::time::SystemTime::now()\
         Backend::Python => "int(__import__('time').time())".to_string(),
 
         // ── C ────────────────────────────────────────────────────────────────
-        // time(2) returns time_t; cast to int64_t.  Requires <time.h>.
-        Backend::C => "(int64_t)time(NULL)".to_string(),
+        // time(2) returns time_t. No cast — see fd_out.rs's C arm for why.
+        // Requires <time.h>.
+        Backend::C => "time(NULL)".to_string(),
 
         // ── C++ ──────────────────────────────────────────────────────────────
         Backend::Cpp => "\
-static_cast<int64_t>(\
-  std::chrono::duration_cast<std::chrono::seconds>(\
-    std::chrono::system_clock::now().time_since_epoch()\
-  ).count()\
-)".to_string(),
+std::chrono::duration_cast<std::chrono::seconds>(\
+  std::chrono::system_clock::now().time_since_epoch()\
+).count()".to_string(),
 
         // ── Go ───────────────────────────────────────────────────────────────
         Backend::Go => "time.Now().Unix()".to_string(),

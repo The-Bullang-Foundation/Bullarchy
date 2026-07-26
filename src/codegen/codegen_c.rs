@@ -629,19 +629,19 @@ pub fn emit_body_c(out: &mut String, body: &BulletBody, params: &[Param], backen
                 // relationship to the required `int` return type at all.
                 if i == last && !returns_unit {
                     out.push_str(&format!("    return {};\n", expr_str));
-                } else if callee_is_unit {
-                    // The callee itself is void — a bare statement, no
-                    // cast, nothing to discard.
+                } else if callee_is_unit || pipe.binding.is_none() {
+                    // Two distinct reasons to skip binding entirely:
+                    // - callee_is_unit: the callee compiles to a `void` C
+                    //   function, nothing to bind.
+                    // - pipe.binding.is_none(): the Bullang source wrote
+                    //   `-> {}` — an explicit discard. A bare statement
+                    //   here relies on the builtin/function not wrapping
+                    //   its result in an explicit cast — a cast used as a
+                    //   discarded statement trips -Wunused-value even
+                    //   though a plain call never does. See fd_out.rs,
+                    //   open.rs, time.rs for builtins where the cast used
+                    //   to be there and was removed for exactly this reason.
                     out.push_str(&format!("    {};\n", expr_str));
-                } else if pipe.binding.is_none() {
-                    // Explicit `-> {}` discard of a non-void expression.
-                    // Some builtins' emitted expression carries its own
-                    // explicit cast (e.g. `(int32_t)write(...)`), and a
-                    // cast used as a bare statement trips -Wunused-value
-                    // even though a plain function call wouldn't. (void)
-                    // here is the standard, deliberate C idiom for "discard
-                    // this on purpose" — not a blanket suppressor.
-                    out.push_str(&format!("    (void)({});\n", expr_str));
                 } else {
                     let binding = pipe.binding.as_deref().unwrap();
                     out.push_str(&format!("    __auto_type {} = {};\n", binding, expr_str));

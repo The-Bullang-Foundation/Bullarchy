@@ -56,7 +56,8 @@ pub fn emit(params: &[Param], backend: &Backend) -> Result<String, String> {
         }
 
         // ── C ────────────────────────────────────────────────────────────────
-        // POSIX open(2). Requires <fcntl.h> and <sys/stat.h>.
+        // POSIX open(2). Requires <fcntl.h> and <sys/stat.h>. No cast on the
+        // result — see fd_out.rs's C arm for why.
         Backend::C => format!(
             "({{ \
                int __flags; \
@@ -65,21 +66,21 @@ pub fn emit(params: &[Param], backend: &Backend) -> Result<String, String> {
                else if (strcmp({mode}, \"a\" ) == 0) __flags = O_WRONLY | O_CREAT | O_APPEND; \
                else if (strcmp({mode}, \"rw\") == 0) __flags = O_RDWR  | O_CREAT; \
                else                                  __flags = O_RDONLY; \
-               (int32_t)open({path}, __flags, 0644); \
+               open({path}, __flags, 0644); \
              }})"
         ),
 
         // ── C++ ──────────────────────────────────────────────────────────────
         // Same POSIX open(2), wrapped in an immediately-invoked lambda.
         Backend::Cpp => format!(
-            "[&]() -> int32_t {{ \
+            "[&]() {{ \
                int __flags; \
                if      ({mode} == \"r\" ) __flags = O_RDONLY; \
                else if ({mode} == \"w\" ) __flags = O_WRONLY | O_CREAT | O_TRUNC; \
                else if ({mode} == \"a\" ) __flags = O_WRONLY | O_CREAT | O_APPEND; \
                else if ({mode} == \"rw\") __flags = O_RDWR  | O_CREAT; \
                else                      __flags = O_RDONLY; \
-               return static_cast<int32_t>(open({path}.c_str(), __flags, 0644)); \
+               return open({path}.c_str(), __flags, 0644); \
              }}()"
         ),
 

@@ -40,14 +40,16 @@ pub fn emit(params: &[Param], backend: &Backend) -> Result<String, String> {
         }
 
         // ── C ────────────────────────────────────────────────────────────────
-        // write(2); returns ssize_t cast to int32_t.
+        // write(2); returns ssize_t. No cast needed — nothing downstream
+        // requires exactly int32_t, and a bare call (unlike a cast used as
+        // a discarded statement) never trips -Wunused-value either way.
         Backend::C => format!(
-            "(int32_t)write({fd}, {content}, strlen({content}))"
+            "write({fd}, {content}, strlen({content}))"
         ),
 
         // ── C++ ──────────────────────────────────────────────────────────────
         Backend::Cpp => format!(
-            "static_cast<int32_t>(write({fd}, {content}.c_str(), {content}.size()))"
+            "write({fd}, {content}.c_str(), {content}.size())"
         ),
 
         // ── Go ───────────────────────────────────────────────────────────────
