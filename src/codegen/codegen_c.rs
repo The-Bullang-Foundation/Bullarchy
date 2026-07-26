@@ -455,8 +455,13 @@ fn emit_body_c_generic(out: &mut String, body: &BulletBody, type_params: &[Strin
                 let expr_str = emit_expr_c_generic(&pipe.expr, type_params);
                 if i == last {
                     out.push_str(&format!("    return {};\n", expr_str));
+                } else if let Some(binding) = pipe.binding.as_deref() {
+                    out.push_str(&format!("    BuVal {} = {};\n", binding, expr_str));
                 } else {
-                    out.push_str(&format!("    BuVal {} = {};\n", pipe.binding.as_deref().unwrap_or("_"), expr_str));
+                    // `-> {}` — explicit discard, no declaration at all
+                    // (see emit_body_c for why fabricating a fallback name
+                    // like `_` is wrong here).
+                    out.push_str(&format!("    {};\n", expr_str));
                 }
             }
         }
@@ -564,20 +569,31 @@ pub fn emit_body_c(out: &mut String, body: &BulletBody, params: &[Param], backen
                 let mut callee_is_unit = false;
                 // Handle builtin::name with implicit pipe inputs
                 let expr_str = if let Expr::Atom(Atom::BuiltinNoArgs(name)) = &pipe.expr {
-                    let synthetic_params: Vec<bullang::ast::Param> = pipe.inputs
-                        .iter()
-                        .enumerate()
-                        .map(|(idx, input)| {
-                            let param_name = match input {
-                                Expr::Atom(Atom::Ident(s)) => s.clone(),
-                                _ => format!("__pipe_arg_{}", idx),
-                            };
-                            bullang::ast::Param {
-                                name: param_name,
-                                ty:   bullang::ast::BuType::Unknown,
+                    let mut synthetic_params: Vec<bullang::ast::Param> = Vec::new();
+                    for (idx, input) in pipe.inputs.iter().enumerate() {
+                        let param_name = match input {
+                            Expr::Atom(Atom::Ident(s)) => s.clone(),
+                            _ => {
+                                // Not a plain variable — declare a real
+                                // temporary above the call and reference
+                                // that instead. emit_call_arg_c renders the
+                                // actual value (and, for a string literal,
+                                // wraps it as a mutable stack compound
+                                // literal — see emit_call_arg_c's doc
+                                // comment for why that matters).
+                                let tmp = format!("__arg_{}", idx);
+                                out.push_str(&format!(
+                                    "    __auto_type {} = {};\n",
+                                    tmp, emit_call_arg_c(input)
+                                ));
+                                tmp
                             }
-                        })
-                        .collect();
+                        };
+                        synthetic_params.push(bullang::ast::Param {
+                            name: param_name,
+                            ty:   bullang::ast::BuType::Unknown,
+                        });
+                    }
                     match crate::stdlib::emit_builtin(name, &synthetic_params, backend) {
                         Ok(code) => code,
                         Err(e)   => format!("/* ERROR: {e} */"),
@@ -614,22 +630,21 @@ pub fn emit_body_c(out: &mut String, body: &BulletBody, params: &[Param], backen
                 if i == last && !returns_unit {
                     out.push_str(&format!("    return {};\n", expr_str));
                 } else if callee_is_unit {
-                    // The callee itself compiles to a `void` C function
-                    // (its own last pipe is unit-returning too, e.g. it
-                    // ends in `builtin::out`) — there's nothing to bind,
-                    // and `__auto_type x = void_call();` doesn't compile.
+                    // The callee itself is void — a bare statement, no
+                    // cast, nothing to discard.
                     out.push_str(&format!("    {};\n", expr_str));
+                } else if pipe.binding.is_none() {
+                    // Explicit `-> {}` discard of a non-void expression.
+                    // Some builtins' emitted expression carries its own
+                    // explicit cast (e.g. `(int32_t)write(...)`), and a
+                    // cast used as a bare statement trips -Wunused-value
+                    // even though a plain function call wouldn't. (void)
+                    // here is the standard, deliberate C idiom for "discard
+                    // this on purpose" — not a blanket suppressor.
+                    out.push_str(&format!("    (void)({});\n", expr_str));
                 } else {
-                    let binding = pipe.binding.as_deref().unwrap_or("_");
+                    let binding = pipe.binding.as_deref().unwrap();
                     out.push_str(&format!("    __auto_type {} = {};\n", binding, expr_str));
-                    // Whether `binding` gets referenced again depends on the
-                    // rest of the Bullang body, not on codegen — a binding
-                    // that's genuinely unused downstream (a call made only
-                    // for its side effect, or the discarded last pipe of a
-                    // unit-returning function) would otherwise trip
-                    // -Wunused-variable under -Werror. (void)-marking it is
-                    // a no-op when the binding IS used later.
-                    out.push_str(&format!("    (void){};\n", binding));
                     if pipe.propagate {
                         out.push_str(&format!(
                             "    if (!{}) {{ return NULL; }}\n",

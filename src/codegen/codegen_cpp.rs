@@ -331,20 +331,27 @@ fn emit_body_cpp(out: &mut String, body: &BulletBody, params: &[Param], returns_
                 let mut callee_is_unit = false;
                 // Handle builtin::name with implicit pipe inputs
                 let expr_str = if let Expr::Atom(Atom::BuiltinNoArgs(name)) = &pipe.expr {
-                    let synthetic_params: Vec<bullang::ast::Param> = pipe.inputs
-                        .iter()
-                        .enumerate()
-                        .map(|(idx, input)| {
-                            let param_name = match input {
-                                Expr::Atom(Atom::Ident(s)) => s.clone(),
-                                _ => format!("__pipe_arg_{}", idx),
-                            };
-                            bullang::ast::Param {
-                                name: param_name,
-                                ty:   bullang::ast::BuType::Unknown,
+                    let mut synthetic_params: Vec<bullang::ast::Param> = Vec::new();
+                    for (idx, input) in pipe.inputs.iter().enumerate() {
+                        let param_name = match input {
+                            Expr::Atom(Atom::Ident(s)) => s.clone(),
+                            _ => {
+                                // Not a plain variable — declare a real
+                                // temporary above the call and reference
+                                // that instead (see codegen_c::emit_body_c).
+                                let tmp = format!("__arg_{}", idx);
+                                out.push_str(&format!(
+                                    "    auto {} = {};\n",
+                                    tmp, emit_expr_cpp(input)
+                                ));
+                                tmp
                             }
-                        })
-                        .collect();
+                        };
+                        synthetic_params.push(bullang::ast::Param {
+                            name: param_name,
+                            ty:   bullang::ast::BuType::Unknown,
+                        });
+                    }
                     match crate::stdlib::emit_builtin(name, &synthetic_params, &Backend::Cpp) {
                         Ok(code) => code,
                         Err(e)   => format!("/* ERROR: {e} */"),
@@ -378,16 +385,16 @@ fn emit_body_cpp(out: &mut String, body: &BulletBody, params: &[Param], returns_
                 if i == last && !returns_unit {
                     out.push_str(&format!("    return {};\n", expr_str));
                 } else if callee_is_unit {
-                    // See codegen_c::emit_body_c — the callee compiles to a
-                    // `void` function, so there's nothing to bind.
+                    // Void callee — bare statement, no cast to discard.
                     out.push_str(&format!("    {};\n", expr_str));
+                } else if pipe.binding.is_none() {
+                    // See codegen_c::emit_body_c — explicit `-> {}` discard
+                    // of a non-void expression; (void) is the deliberate
+                    // discard idiom, not a blanket suppressor.
+                    out.push_str(&format!("    (void)({});\n", expr_str));
                 } else {
-                    let binding = pipe.binding.as_deref().unwrap_or("_");
+                    let binding = pipe.binding.as_deref().unwrap();
                     out.push_str(&format!("    auto {} = {};\n", binding, expr_str));
-                    // See codegen_c::emit_body_c for why every binding gets
-                    // (void)-marked regardless of whether it's referenced
-                    // again downstream.
-                    out.push_str(&format!("    (void){};\n", binding));
                     if pipe.propagate {
                         // C++ std::optional — if nullopt, return nullopt
                         out.push_str(&format!(
