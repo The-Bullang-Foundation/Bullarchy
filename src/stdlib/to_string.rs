@@ -11,7 +11,7 @@ pub fn emit(params: &[Param], backend: &Backend) -> Result<String, String> {
     Ok(match backend {
         Backend::Rust    => format!("{}.to_string()", p[0]),
         Backend::Python  => format!("str({})", super::py_esc(p[0])),
-        Backend::C       => format!("/* to_string: use sprintf for {} */", p[0]),
+        Backend::C       => format!("to_string({})", p[0]),
         Backend::Cpp     => format!("std::to_string({})", p[0]),
         Backend::Go      => format!("fmt.Sprintf(\"%v\", {})", p[0]),
         Backend::Java    => format!("String.valueOf({})", p[0]),

@@ -117,9 +117,13 @@ pub fn required_includes(name: &str, backend: &Backend) -> Vec<&'static str> {
         ("to_upper", Backend::C) | ("to_lower", Backend::C) => vec!["#include <ctype.h>"],
         ("trim", Backend::C) => vec!["#include <ctype.h>", "#include <string.h>"],
         ("out", Backend::C) => vec!["#include <string.h>", "#include <unistd.h>"],
+        ("replace_str", Backend::C) => vec!["#include <stdlib.h>", "#include <string.h>"],
+        ("to_string", Backend::C) => vec!["#include <stdio.h>", "#include <stdlib.h>"],
         ("to_upper", Backend::Cpp) | ("to_lower", Backend::Cpp) => vec!["#include <algorithm>", "#include <cctype>", "#include <string>"],
         ("trim", Backend::Cpp) => vec!["#include <string>"],
         ("out", Backend::Cpp) => vec!["#include <string>", "#include <unistd.h>"],
+        ("replace_str", Backend::Cpp) => vec!["#include <string>"],
+        ("to_string", Backend::Cpp) => vec!["#include <string>"],
         _ => Vec::new(),
     }
 }
@@ -165,6 +169,47 @@ pub fn helper_definition(name: &str, backend: &Backend) -> Option<&'static str> 
              \treturn (str + start);\n\
              }\n"
         ),
+        ("replace_str", Backend::C) => Some(
+            "static char *replace_str(const char *s, const char *from, const char *to) {\n\
+             \tsize_t from_len = strlen(from);\n\
+             \tsize_t to_len = strlen(to);\n\
+             \tif (from_len == 0) {\n\
+             \t\tsize_t len = strlen(s);\n\
+             \t\tchar *result = malloc(len + 1);\n\
+             \t\tmemcpy(result, s, len + 1);\n\
+             \t\treturn (result);\n\
+             \t}\n\
+             \tsize_t count = 0;\n\
+             \tconst char *p = s;\n\
+             \twhile ((p = strstr(p, from)) != NULL) {\n\
+             \t\tcount++;\n\
+             \t\tp += from_len;\n\
+             \t}\n\
+             \tsize_t result_len = strlen(s) - (count * from_len) + (count * to_len);\n\
+             \tchar *result = malloc(result_len + 1);\n\
+             \tchar *dst = result;\n\
+             \tconst char *src = s;\n\
+             \twhile (*src) {\n\
+             \t\tif (strncmp(src, from, from_len) == 0) {\n\
+             \t\t\tmemcpy(dst, to, to_len);\n\
+             \t\t\tdst += to_len;\n\
+             \t\t\tsrc += from_len;\n\
+             \t\t} else {\n\
+             \t\t\t*dst++ = *src++;\n\
+             \t\t}\n\
+             \t}\n\
+             \t*dst = '\\0';\n\
+             \treturn (result);\n\
+             }\n"
+        ),
+        ("to_string", Backend::C) => Some(
+            "static char *to_string(long long x) {\n\
+             \tint len = snprintf(NULL, 0, \"%lld\", x);\n\
+             \tchar *result = malloc(len + 1);\n\
+             \tsnprintf(result, len + 1, \"%lld\", x);\n\
+             \treturn (result);\n\
+             }\n"
+        ),
         ("to_upper", Backend::Cpp) => Some(
             "static std::string to_upper(std::string str) {\n\
              \tstd::transform(str.begin(), str.end(), str.begin(), ::toupper);\n\
@@ -182,6 +227,19 @@ pub fn helper_definition(name: &str, backend: &Backend) -> Option<&'static str> 
              \tstr.erase(0, str.find_first_not_of(\" \\t\\n\\r\"));\n\
              \tstr.erase(str.find_last_not_of(\" \\t\\n\\r\") + 1);\n\
              \treturn (str);\n\
+             }\n"
+        ),
+        ("replace_str", Backend::Cpp) => Some(
+            "static std::string replace_str(std::string s, const std::string &from, const std::string &to) {\n\
+             \tif (from.empty()) {\n\
+             \t\treturn (s);\n\
+             \t}\n\
+             \tstd::size_t pos = 0;\n\
+             \twhile ((pos = s.find(from, pos)) != std::string::npos) {\n\
+             \t\ts.replace(pos, from.size(), to);\n\
+             \t\tpos += to.size();\n\
+             \t}\n\
+             \treturn (s);\n\
              }\n"
         ),
         _ => None,

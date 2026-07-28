@@ -20,13 +20,11 @@ pub fn emit(params: &[Param], backend: &Backend) -> Result<String, String> {
             super::py_esc(p[2])
         ),
         Backend::C       => format!(
-            "/* replace_str: implement manually for {} */",
-            p[0]
+            "replace_str({}, {}, {})",
+            p[0], p[1], p[2]
         ),
         Backend::Cpp     => format!(
-            "[&](){{ std::string _s={0}; std::size_t pos=0; \
-             while((pos=_s.find({1},pos))!=std::string::npos) \
-             {{ _s.replace(pos,{1}.size(),{2}); pos+={2}.size(); }} return _s; }}()",
+            "replace_str({0}, {1}, {2})",
             p[0], p[1], p[2]
         ),
         Backend::Go      => format!(
