@@ -203,7 +203,7 @@ pub fn emit_go_mod(module_name: &str) -> String {
 /// which is what real Bullang source overwhelmingly uses in practice — this
 /// used to only be checked for the shorthand form, so imports were silently
 /// missing for nearly every builtin call in normal code).
-fn builtin_imports(name: &str, imports: &mut Vec<String>) {
+fn builtin_imports(name: &str, imports: &mut Vec<&'static str>) {
     match name {
         "sqrt" | "powf" | "pow" => { push_unique(imports, "math"); }
         "max" | "min" => { push_unique(imports, "math"); push_unique(imports, "slices"); }
