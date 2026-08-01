@@ -8,6 +8,13 @@ use bullang::ast::*;
 use crate::stdlib;
 use std::collections::BTreeSet;
 
+/// The Vec[T]/HashMap[K,V] runtime (vec_t/map_t) — normally written as a
+/// companion foreign_types.h in multi-file project builds. Bare/single-file
+/// mode has no companion file to include, so when it's needed it gets
+/// inlined directly into the .c file instead, right after the #includes —
+/// same placement as a hoisted builtin helper.
+const FOREIGN_TYPES_C: &str = include_str!("../foreign_types.h");
+
 // ── Hoisted includes ─────────────────────────────────────────────────────────
 
 /// Walk every bullet in `file` and collect the `#include` lines required by
@@ -148,6 +155,10 @@ pub fn emit_bare_c(file: &SourceFile) -> String {
     if !includes.is_empty() {
         out.push('\n');
     }
+    if needs_foreign_types(file) {
+        out.push_str(FOREIGN_TYPES_C);
+        out.push('\n');
+    }
     emit_c_helpers(&mut out, file);
     let unit_fns = collect_unit_functions(file);
     for func in &file.bullets {
@@ -185,11 +196,21 @@ pub fn emit_enum_c(e: &bullang::ast::EnumDef) -> String {
 
 // ── foreign_types.h detection ─────────────────────────────────────────────────
 
-/// Returns true if the source file uses any type that requires foreign_types.h.
+/// Returns true if the source file uses any type that requires foreign_types.h,
+/// OR calls a builtin (max, min, args) whose C implementation uses vec_t
+/// internally even when Vec[T] never appears in the calling function's own
+/// signature (e.g. an intermediate binding that's never returned or taken
+/// as a param).
 pub fn needs_foreign_types(file: &SourceFile) -> bool {
+    const VEC_BUILTINS: &[&str] = &["max", "min", "args"];
     file.bullets.iter().any(|b| {
         b.params.iter().any(|p| type_needs_foreign(&p.ty))
             || type_needs_foreign(&b.output.as_ref().map(|o| &o.ty).unwrap_or(&bullang::ast::BuType::Named("()".to_string())))
+            || {
+                let mut names: BTreeSet<&str> = BTreeSet::new();
+                collect_builtin_names_c(&b.body, &mut names);
+                names.iter().any(|n| VEC_BUILTINS.contains(n))
+            }
     })
 }
 

@@ -197,24 +197,40 @@ pub fn emit_go_mod(module_name: &str) -> String {
 
 // ── Import detection ──────────────────────────────────────────────────────────
 
+/// Import(s) a given builtin name needs, shared between the `BulletBody::Builtin`
+/// shorthand (a function body that's just one bare builtin call) and the
+/// ordinary `BulletBody::Pipes` path (`(args) : builtin::name -> {binding}`,
+/// which is what real Bullang source overwhelmingly uses in practice — this
+/// used to only be checked for the shorthand form, so imports were silently
+/// missing for nearly every builtin call in normal code).
+fn builtin_imports(name: &str, imports: &mut Vec<String>) {
+    match name {
+        "sqrt" | "powf" | "pow" => { push_unique(imports, "math"); }
+        "max" | "min" => { push_unique(imports, "math"); push_unique(imports, "slices"); }
+        "parse_i64" => { push_unique(imports, "strconv"); push_unique(imports, "strings"); }
+        "join" | "split_str" | "trim" | "to_upper" | "to_lower"
+        | "starts_with" | "ends_with" | "replace_str" => {
+            push_unique(imports, "strings");
+        }
+        "to_string" => { push_unique(imports, "fmt"); }
+        "sort" | "sort_by" => { push_unique(imports, "sort"); }
+        _ => {}
+    }
+}
+
+fn pipes_builtin_names(pipes: &[Pipe]) -> Vec<&str> {
+    pipes.iter().filter_map(|p| match &p.expr {
+        Expr::Atom(Atom::BuiltinNoArgs(name)) => Some(name.as_str()),
+        _ => None,
+    }).collect()
+}
+
 fn needed_imports(file: &SourceFile) -> Vec<String> {
     let mut imports = Vec::new();
 
     for func in &file.bullets {
         match &func.body {
-            BulletBody::Builtin(name) => {
-                match name.as_str() {
-                    "sqrt" | "powf" | "pow" => { push_unique(&mut imports, "math"); }
-                    "parse_i64" => { push_unique(&mut imports, "strconv"); push_unique(&mut imports, "strings"); }
-                    "join" | "split_str" | "trim" | "to_upper" | "to_lower"
-                    | "starts_with" | "ends_with" | "replace_str" => {
-                        push_unique(&mut imports, "strings");
-                    }
-                    "to_string" => { push_unique(&mut imports, "fmt"); }
-                    "sort" | "sort_by" => { push_unique(&mut imports, "sort"); }
-                    _ => {}
-                }
-            }
+            BulletBody::Builtin(name) => builtin_imports(name, &mut imports),
             BulletBody::Natives(blocks) => {
                 if let Some(b) = blocks.iter().find(|b| b.backend == Backend::Go) {
                     if b.code.contains("sort.")    { push_unique(&mut imports, "sort"); }
@@ -229,6 +245,9 @@ fn needed_imports(file: &SourceFile) -> Vec<String> {
             BulletBody::Pipes(pipes) => {
                 if pipes.iter().any(|p| pipe_has_interp(&p.expr)) {
                     push_unique(&mut imports, "fmt");
+                }
+                for name in pipes_builtin_names(pipes) {
+                    builtin_imports(name, &mut imports);
                 }
             }
         }

@@ -23,14 +23,18 @@ pub fn emit(params: &[Param], backend: &Backend) -> Result<String, String> {
 
         // ── C ────────────────────────────────────────────────────────────────
         // Reads from Bullang-managed globals set by the emitted main().
-        // Returns a vec_t* of char* (each string is argv[i]).
+        // Returns a heap-allocated vec_t* of char* (each string is argv[i]) —
+        // heap, not a local vec_t by value, because the returned pointer has
+        // to outlive this function's own stack frame, and every other
+        // builtin that consumes a Vec[T] (max, min) expects a vec_t*.
         Backend::C => "\
 ({\
-  vec_t *__args = vec_new();\
+  vec_t *__args = malloc(sizeof(vec_t));\
+  *__args = vec_new(sizeof(char *));\
   extern int   __bu_argc;\
   extern char **__bu_argv;\
   for (int __i = 1; __i < __bu_argc; __i++)\
-    vec_push(__args, __bu_argv[__i]);\
+    vec_push(__args, &__bu_argv[__i]);\
   __args;\
 })".to_string(),
 

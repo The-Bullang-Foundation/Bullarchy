@@ -3,15 +3,17 @@ use bullang::ast::{Backend, Param};
 pub const META: (&str, &str, &str) = (
     "max",
     "(arr: Vec[T])             → T",
-    "Maximum value in an array — linear scan, no delegation to language primitives",
+    "Maximum value in an array — delegates the scan to the target language's native tool where one exists",
 );
 
-// Empty array behaviour (consistent across all backends):
+// Empty array behaviour (consistent across all backends, unchanged from
+// before this delegated to native tools):
 //   - Rust:   panic with a clear message
 //   - Python: raises ValueError
 //   - C:      returns INT64_MAX (sentinel — caller must check)
 //   - C++:    returns INT64_MAX
 //   - Go:     returns math.MaxInt64
+//   - Java:   returns Long.MAX_VALUE
 
 pub fn emit(params: &[Param], backend: &Backend) -> Result<String, String> {
     let p = super::need("max", params, 1)?;
@@ -19,41 +21,19 @@ pub fn emit(params: &[Param], backend: &Backend) -> Result<String, String> {
 
     Ok(match backend {
         // ── Rust ─────────────────────────────────────────────────────────────
+        // Iterator::max() is the native tool — no hand-rolled scan needed.
         Backend::Rust => format!(
-            "{{\
-               fn __max<T: Ord + Clone>(v: &[T]) -> T {{\
-                 if v.is_empty() {{ panic!(\"builtin::max called on empty Vec\"); }}\
-                 let mut __m = v[0].clone();\
-                 let mut __i = 1usize;\
-                 while __i < v.len() {{\
-                   if v[__i] > __m {{ __m = v[__i].clone(); }}\
-                   __i += 1;\
-                 }}\
-                 __m\
-               }}\
-               __max(&{arr})\
-             }}"
+            "{arr}.iter().max().cloned().unwrap_or_else(|| panic!(\"builtin::max called on empty Vec\"))"
         ),
 
         // ── Python ───────────────────────────────────────────────────────────
-        Backend::Python => {
-            let arr = super::py_esc(arr);
-            format!(
-                "(lambda __f: __f(__f, list({arr})))(\
-                   lambda __f, __a: \
-                     (lambda: (_ for _ in ()).throw(ValueError('builtin::max called on empty list')))() \
-                     if not __a else \
-                     (lambda __m: \
-                       (lambda __g: __g(__g, __a[1:], __m))(\
-                         lambda __g, __r, __m: __m if not __r \
-                           else __g(__g, __r[1:], __r[0] if __r[0] > __m else __m)\
-                       )\
-                     )(__a[0])\
-                 )"
-            )
-        }
+        // max() already raises ValueError on an empty sequence — exactly the
+        // documented behaviour, with zero extra code.
+        Backend::Python => format!("max({})", super::py_esc(arr)),
 
         // ── C ────────────────────────────────────────────────────────────────
+        // No native "max of an array" tool exists in C — hand-rolled scan
+        // is the correct approach here, not a reinvented wheel.
         Backend::C => format!(
             "({{ \
                vec_t *__src = {arr}; \
@@ -71,41 +51,32 @@ pub fn emit(params: &[Param], backend: &Backend) -> Result<String, String> {
         ),
 
         // ── C++ ──────────────────────────────────────────────────────────────
+        // std::max_element is the native tool for the scan itself; the
+        // empty-vector guard is still needed since dereferencing end() is UB.
         Backend::Cpp => format!(
             "[&]() -> int64_t {{ \
                const auto &__v = {arr}; \
                if (__v.empty()) return INT64_MAX; \
-               int64_t __m = static_cast<int64_t>(__v[0]); \
-               for (size_t __i = 1; __i < __v.size(); ++__i) \
-                 if (static_cast<int64_t>(__v[__i]) > __m) \
-                   __m = static_cast<int64_t>(__v[__i]); \
-               return __m; \
+               return static_cast<int64_t>(*std::max_element(__v.begin(), __v.end())); \
              }}()"
         ),
 
         // ── Go ───────────────────────────────────────────────────────────────
+        // slices.Max is the native tool for the scan; it panics on an empty
+        // slice, so the guard preserves the documented sentinel behaviour.
         Backend::Go => format!(
             "func() int64 {{ \
                __v := {arr}; \
                if len(__v) == 0 {{ return math.MaxInt64 }} \
-               __m := __v[0]; \
-               for __i := 1; __i < len(__v); __i++ {{ \
-                 if __v[__i] > __m {{ __m = __v[__i] }} \
-               }} \
-               return __m; \
+               return slices.Max(__v); \
              }}()"
         ),
 
-        Backend::Java    => format!(
-            "((java.util.function.LongSupplier)(() -> {{ \
-               long[] __arr = new long[{arr}.size()]; \
-               for (int __i = 0; __i < {arr}.size(); __i++) __arr[__i] = {arr}.get(__i); \
-               if (__arr.length == 0) return Long.MAX_VALUE; \
-               long __m = __arr[0]; \
-               for (int __i = 1; __i < __arr.length; __i++) if (__arr[__i] > __m) __m = __arr[__i]; \
-               return __m; \
-             }})).getAsLong()",
-            arr = arr
+        // ── Java ─────────────────────────────────────────────────────────────
+        // Collections.max is the native tool; it throws on an empty
+        // collection, so the guard preserves the documented sentinel.
+        Backend::Java => format!(
+            "({arr}.isEmpty() ? Long.MAX_VALUE : java.util.Collections.max({arr}))"
         ),
         Backend::Unknown(kw) => return Err(format!(
             "'builtin::max' is not available for unknown backend '{kw}'"

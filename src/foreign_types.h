@@ -110,7 +110,9 @@ static inline void map_set(map_t *m, const char *key, void *value, size_t value_
         entry = entry->next;
     }
     map_entry_t *new_entry  = (map_entry_t *)malloc(sizeof(map_entry_t));
-    new_entry->key          = strdup(key);
+    size_t       key_len    = strlen(key) + 1;
+    new_entry->key          = (char *)malloc(key_len);
+    memcpy(new_entry->key, key, key_len);
     new_entry->value        = malloc(value_size);
     new_entry->value_size   = value_size;
     memcpy(new_entry->value, value, value_size);
