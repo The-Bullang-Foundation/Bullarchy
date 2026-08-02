@@ -19,6 +19,56 @@
 //!   ()             → (omitted)
 
 use bullang::ast::*;
+use crate::codegen::typeinfer::{TypeEnv, collect_fn_output_types};
+use std::collections::HashMap;
+
+// ── Hoisted helper functions ────────────────────────────────────────────────
+
+/// `tern` has no native Go equivalent (no ternary operator) and no way to
+/// know its concrete return type T at emit()'s call site (Pipe carries no
+/// type info — see collect_builtin_names_go below). A generic helper lets
+/// Go's own call-site type inference resolve T and U from the arguments,
+/// sidestepping that gap entirely instead of boxing through interface{}
+/// (the previous approach, which broke the moment the result was used in
+/// any typed expression).
+const TERN_HELPER_GO: &str =
+    "func __tern[U comparable, T any](v1, v2 U, a, b T) T {\n\
+     \tif v1 == v2 {\n\
+     \t\treturn a\n\
+     \t}\n\
+     \treturn b\n\
+     }\n\n";
+
+/// Scan a single function body for builtin names, covering both the
+/// `Pipes` form and the bare `BulletBody::Builtin(name)` shorthand — same
+/// two forms codegen_c.rs's collect_builtin_names_c has to handle.
+fn collect_builtin_names_go<'a>(body: &'a BulletBody, out: &mut std::collections::BTreeSet<&'a str>) {
+    match body {
+        BulletBody::Pipes(pipes) => {
+            for pipe in pipes {
+                if let Expr::Atom(Atom::BuiltinNoArgs(name)) = &pipe.expr {
+                    out.insert(name.as_str());
+                }
+            }
+        }
+        BulletBody::Builtin(name) => { out.insert(name.as_str()); }
+        BulletBody::Natives(_) => {}
+    }
+}
+
+fn needs_tern_helper(file: &SourceFile) -> bool {
+    let mut names = std::collections::BTreeSet::new();
+    for func in &file.bullets {
+        collect_builtin_names_go(&func.body, &mut names);
+    }
+    names.contains("tern")
+}
+
+fn emit_go_helpers(out: &mut String, file: &SourceFile) {
+    if needs_tern_helper(file) {
+        out.push_str(TERN_HELPER_GO);
+    }
+}
 
 // ── Source file → Go ──────────────────────────────────────────────────────────
 
@@ -33,9 +83,11 @@ pub fn emit_source_go(file: &SourceFile, package: &str) -> String {
         for imp in &imports { out.push_str(&format!("\t\"{}\"\n", imp)); }
         out.push_str(")\n\n");
     }
+    emit_go_helpers(&mut out, file);
 
+    let fn_outputs = collect_fn_output_types(file);
     for func in &file.bullets {
-        out.push_str(&emit_function_go(func));
+        out.push_str(&emit_function_go(func, &fn_outputs));
         out.push('\n');
     }
     out
@@ -45,8 +97,10 @@ pub fn emit_source_go(file: &SourceFile, package: &str) -> String {
 /// no imports, no preamble.
 pub fn emit_bare_go(file: &SourceFile) -> String {
     let mut out = String::new();
+    emit_go_helpers(&mut out, file);
+    let fn_outputs = collect_fn_output_types(file);
     for func in &file.bullets {
-        out.push_str(&emit_function_go(func));
+        out.push_str(&emit_function_go(func, &fn_outputs));
         out.push('\n');
     }
     out
@@ -178,12 +232,14 @@ pub fn emit_main_go(file: &SourceFile, _package: &str) -> String {
         for imp in unique { out.push_str(&format!("\t\"{}\"\n", imp)); }
         out.push_str(")\n\n");
     }
+    emit_go_helpers(&mut out, file);
 
+    let fn_outputs = collect_fn_output_types(file);
     for func in &file.bullets {
         if func.name == "main" {
-            out.push_str(&emit_main_function_go(func));
+            out.push_str(&emit_main_function_go(func, &fn_outputs));
         } else {
-            out.push_str(&emit_function_go(func));
+            out.push_str(&emit_function_go(func, &fn_outputs));
         }
         out.push('\n');
     }
@@ -284,7 +340,7 @@ fn push_unique(v: &mut Vec<&'static str>, s: &'static str) {
 
 // ── Function emitters ─────────────────────────────────────────────────────────
 
-fn emit_function_go(func: &Bullet) -> String {
+fn emit_function_go(func: &Bullet, fn_outputs: &HashMap<String, BuType>) -> String {
     let mut out   = String::new();
     let params    = go_param_list(&func.params);
     let ret       = bu_type_to_go(&func.output.as_ref().map(|o| &o.ty).unwrap_or(&bullang::ast::BuType::Named("()".to_string())));
@@ -306,7 +362,7 @@ fn emit_function_go(func: &Bullet) -> String {
     } else {
         out.push_str(&format!("func {}{}({}) {} {{\n", go_name, type_param_str, params, ret));
     }
-    emit_body_go(&mut out, &func.body, &func.params, &func.output);
+    emit_body_go(&mut out, &func.body, &func.params, &func.output, fn_outputs);
     out.push_str("}\n");
     out
 }
@@ -325,19 +381,20 @@ fn go_expr_has_cmp(expr: &Expr) -> bool {
     matches!(expr, Expr::BinOp(b) if matches!(b.op.as_str(), "<" | ">" | "<=" | ">="))
 }
 
-fn emit_main_function_go(func: &Bullet) -> String {
+fn emit_main_function_go(func: &Bullet, fn_outputs: &HashMap<String, BuType>) -> String {
     let mut out = String::new();
     out.push_str("func main() {\n");
-    emit_body_go(&mut out, &func.body, &func.params, &func.output);
+    emit_body_go(&mut out, &func.body, &func.params, &func.output, fn_outputs);
     out.push_str("}\n");
     out
 }
 
-fn emit_body_go(out: &mut String, body: &BulletBody, params: &[Param], output: &Option<OutputDecl>) {
+fn emit_body_go(out: &mut String, body: &BulletBody, params: &[Param], output: &Option<OutputDecl>, fn_outputs: &HashMap<String, BuType>) {
     match body {
         BulletBody::Pipes(pipes) => {
             if pipes.is_empty() { return; }
             let last = pipes.len().saturating_sub(1);
+            let mut env = TypeEnv::seed(params, fn_outputs);
             for (i, pipe) in pipes.iter().enumerate() {
                 // Handle builtin::name with implicit pipe inputs
                 let expr_str = if let Expr::Atom(Atom::BuiltinNoArgs(name)) = &pipe.expr {
@@ -351,7 +408,7 @@ fn emit_body_go(out: &mut String, body: &BulletBody, params: &[Param], output: &
                             };
                             bullang::ast::Param {
                                 name: param_name,
-                                ty:   bullang::ast::BuType::Unknown,
+                                ty:   env.infer(input),
                             }
                         })
                         .collect();
@@ -374,6 +431,9 @@ fn emit_body_go(out: &mut String, body: &BulletBody, params: &[Param], output: &
                         }
                     }
                 };
+                if let Some(binding) = pipe.binding.as_deref() {
+                    env.bind(binding, env.infer(&pipe.expr));
+                }
                 out.push_str(&format!("\t{} := {}\n", pipe.binding.as_deref().unwrap_or("_"), expr_str));
                 if pipe.propagate {
                     // Go has no ? — emit an explicit nil/error check

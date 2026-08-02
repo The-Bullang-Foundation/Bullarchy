@@ -6,7 +6,8 @@
 
 use bullang::ast::*;
 use crate::stdlib;
-use std::collections::BTreeSet;
+use crate::codegen::typeinfer::{TypeEnv, collect_fn_output_types};
+use std::collections::{BTreeSet, HashMap};
 
 /// The Vec[T]/HashMap[K,V] runtime (vec_t/map_t) — normally written as a
 /// companion foreign_types.h in multi-file project builds. Bare/single-file
@@ -153,8 +154,9 @@ pub fn emit_source_c(file: &SourceFile, header_name: &str) -> String {
     emit_c_helpers(&mut out, file);
 
     let unit_fns = collect_unit_functions(file);
+    let fn_outputs = collect_fn_output_types(file);
     for func in &file.bullets {
-        out.push_str(&emit_function_c(func, &unit_fns));
+        out.push_str(&emit_function_c(func, &unit_fns, &fn_outputs));
         out.push('\n');
     }
     out
@@ -180,11 +182,12 @@ pub fn emit_bare_c(file: &SourceFile) -> String {
     }
     emit_c_helpers(&mut out, file);
     let unit_fns = collect_unit_functions(file);
+    let fn_outputs = collect_fn_output_types(file);
     for func in &file.bullets {
         if func.name == "main" {
-            out.push_str(&emit_main_function_c(func, &unit_fns));
+            out.push_str(&emit_main_function_c(func, &unit_fns, &fn_outputs));
         } else {
-            out.push_str(&emit_function_c(func, &unit_fns));
+            out.push_str(&emit_function_c(func, &unit_fns, &fn_outputs));
         }
         out.push('\n');
     }
@@ -398,18 +401,17 @@ pub fn emit_main_c(file: &SourceFile, header_name: &str) -> String {
     emit_c_helpers(&mut out, file);
 
     let unit_fns = collect_unit_functions(file);
+    let fn_outputs = collect_fn_output_types(file);
     for func in &file.bullets {
         if func.name == "main" {
-            out.push_str(&emit_main_function_c(func, &unit_fns));
+            out.push_str(&emit_main_function_c(func, &unit_fns, &fn_outputs));
         } else {
-            out.push_str(&emit_function_c(func, &unit_fns));
+            out.push_str(&emit_function_c(func, &unit_fns, &fn_outputs));
         }
         out.push('\n');
     }
     out
 }
-
-/// Emit a Makefile for the generated C project.
 pub fn emit_makefile(
     crate_name:   &str,
     source_files: &[String],
@@ -448,14 +450,14 @@ pub fn emit_makefile(
 
 // ── Function emitters ─────────────────────────────────────────────────────────
 
-fn emit_function_c(func: &Bullet, unit_fns: &BTreeSet<&str>) -> String {
+fn emit_function_c(func: &Bullet, unit_fns: &BTreeSet<&str>, fn_outputs: &HashMap<String, BuType>) -> String {
     let mut out = String::new();
 
     if func.type_params.is_empty() {
         let params = c_param_list(&func.params);
         let ret    = bu_type_to_c(&func.output.as_ref().map(|o| &o.ty).unwrap_or(&bullang::ast::BuType::Named("()".to_string())));
         out.push_str(&format!("{} {}({}) {{\n", ret, func.name, params));
-        emit_body_c(&mut out, &func.body, &func.params, &Backend::C, ret == "void", unit_fns);
+        emit_body_c(&mut out, &func.body, &func.params, &Backend::C, ret == "void", unit_fns, fn_outputs);
     } else {
         // Generic function — type params become BuVal.
         out.push_str("#include \"bu_generic.h\"\n");
@@ -590,27 +592,29 @@ fn emit_atom_c_generic(atom: &Atom, tp: &[String]) -> String {
     }
 }
 
-fn emit_main_function_c(func: &Bullet, unit_fns: &BTreeSet<&str>) -> String {
+fn emit_main_function_c(func: &Bullet, unit_fns: &BTreeSet<&str>, fn_outputs: &HashMap<String, BuType>) -> String {
     let mut out = String::new();
     out.push_str("int main(void) {\n");
-    emit_body_c(&mut out, &func.body, &func.params, &Backend::C, true, unit_fns);
+    emit_body_c(&mut out, &func.body, &func.params, &Backend::C, true, unit_fns, fn_outputs);
     // If body doesn't have a return, add one
     out.push_str("    return 0;\n");
     out.push_str("}\n");
     out
 }
 
-pub fn emit_body_c(out: &mut String, body: &BulletBody, params: &[Param], backend: &Backend, returns_unit: bool, unit_fns: &BTreeSet<&str>) {
+pub fn emit_body_c(out: &mut String, body: &BulletBody, params: &[Param], backend: &Backend, returns_unit: bool, unit_fns: &BTreeSet<&str>, fn_outputs: &HashMap<String, BuType>) {
     match body {
         BulletBody::Pipes(pipes) => {
             if pipes.is_empty() { return; }
             let last = pipes.len().saturating_sub(1);
+            let mut env = TypeEnv::seed(params, fn_outputs);
             for (i, pipe) in pipes.iter().enumerate() {
                 let mut callee_is_unit = false;
                 // Handle builtin::name with implicit pipe inputs
                 let expr_str = if let Expr::Atom(Atom::BuiltinNoArgs(name)) = &pipe.expr {
                     let mut synthetic_params: Vec<bullang::ast::Param> = Vec::new();
                     for (idx, input) in pipe.inputs.iter().enumerate() {
+                        let inferred_ty = env.infer(input);
                         let param_name = match input {
                             Expr::Atom(Atom::Ident(s)) => s.clone(),
                             _ => {
@@ -631,7 +635,7 @@ pub fn emit_body_c(out: &mut String, body: &BulletBody, params: &[Param], backen
                         };
                         synthetic_params.push(bullang::ast::Param {
                             name: param_name,
-                            ty:   bullang::ast::BuType::Unknown,
+                            ty:   inferred_ty,
                         });
                     }
                     match crate::stdlib::emit_builtin(name, &synthetic_params, backend) {
@@ -684,6 +688,7 @@ pub fn emit_body_c(out: &mut String, body: &BulletBody, params: &[Param], backen
                     out.push_str(&format!("    {};\n", expr_str));
                 } else {
                     let binding = pipe.binding.as_deref().unwrap();
+                    env.bind(binding, env.infer(&pipe.expr));
                     out.push_str(&format!("    __auto_type {} = {};\n", binding, expr_str));
                     if pipe.propagate {
                         out.push_str(&format!(
