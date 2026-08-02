@@ -214,6 +214,16 @@ fn builtin_imports(name: &str, imports: &mut Vec<&'static str>) {
         }
         "to_string" => { push_unique(imports, "fmt"); }
         "sort" | "sort_by" => { push_unique(imports, "sort"); }
+        "open" | "env" | "exit" | "args" => { push_unique(imports, "os"); }
+        "close" | "out" => { push_unique(imports, "syscall"); }
+        "in" => {
+            push_unique(imports, "os");
+            push_unique(imports, "bufio");
+            push_unique(imports, "strings");
+            push_unique(imports, "runtime");
+        }
+        "time" | "sleep" => { push_unique(imports, "time"); }
+        "run" => { push_unique(imports, "os/exec"); push_unique(imports, "runtime"); }
         _ => {}
     }
 }

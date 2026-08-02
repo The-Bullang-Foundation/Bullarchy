@@ -433,8 +433,13 @@ fn emit_body_cpp(out: &mut String, body: &BulletBody, params: &[Param], returns_
         BulletBody::Builtin(name) => {
             use crate::stdlib;
             match stdlib::emit_builtin(name, params, &Backend::Cpp) {
-                Ok(code) => out.push_str(&format!("    return {};\n", code)),
-                Err(e)   => out.push_str(&format!("    // ERROR: {}\n", e)),
+                // Same reasoning as the `i == last && !returns_unit` branch
+                // above: a unit-returning function (`-> ()`, including
+                // `main`) never turns its sole builtin call into
+                // `return expr;`.
+                Ok(code) if returns_unit => out.push_str(&format!("    {};\n", code)),
+                Ok(code)                 => out.push_str(&format!("    return {};\n", code)),
+                Err(e)                   => out.push_str(&format!("    // ERROR: {}\n", e)),
             }
         }
     }

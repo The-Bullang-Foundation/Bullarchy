@@ -27,12 +27,21 @@ fn collect_rust_imports(file: &SourceFile) -> Vec<&'static str> {
 }
 
 fn collect_builtin_names<'a>(body: &'a BulletBody, out: &mut BTreeSet<&'a str>) {
-    if let BulletBody::Pipes(pipes) = body {
-        for pipe in pipes {
-            if let Expr::Atom(Atom::BuiltinNoArgs(name)) = &pipe.expr {
-                out.insert(name.as_str());
+    match body {
+        BulletBody::Pipes(pipes) => {
+            for pipe in pipes {
+                if let Expr::Atom(Atom::BuiltinNoArgs(name)) = &pipe.expr {
+                    out.insert(name.as_str());
+                }
             }
         }
+        // Bare shorthand form (e.g. `-> builtin::close`) — previously
+        // unhandled here, silently dropping required `use` lines for any
+        // function using this form instead of pipe syntax.
+        BulletBody::Builtin(name) => {
+            out.insert(name.as_str());
+        }
+        BulletBody::Natives(_) => {}
     }
 }
 
@@ -312,7 +321,8 @@ fn emit_function(func: &Bullet, backend: &Backend) -> String {
         out.push_str(&format!("pub fn {}<{}>({}) -> {} {{\n", func.name, type_str, params, ret_ty));
     }
 
-    emit_body(&mut out, &func.body, &func.params, backend);
+    let returns_unit = super::codegen_c::output_is_unit(func);
+    emit_body(&mut out, &func.body, &func.params, backend, returns_unit);
     out.push_str("}\n");
     out
 }
@@ -342,12 +352,12 @@ fn emit_main_function(func: &Bullet) -> String {
 
     // main() takes no arguments in Rust
     out.push_str("fn main() {\n");
-    emit_body(&mut out, &func.body, &func.params, &Backend::Rust);
+    emit_body(&mut out, &func.body, &func.params, &Backend::Rust, true);
     out.push_str("}\n");
     out
 }
 
-fn emit_body(out: &mut String, body: &BulletBody, params: &[Param], backend: &Backend) {
+fn emit_body(out: &mut String, body: &BulletBody, params: &[Param], backend: &Backend, returns_unit: bool) {
     match body {
         BulletBody::Pipes(pipes) => {
             let last = pipes.len().saturating_sub(1);
@@ -433,8 +443,16 @@ fn emit_body(out: &mut String, body: &BulletBody, params: &[Param], backend: &Ba
         }
         BulletBody::Builtin(name) => {
             match stdlib::emit_builtin(name, params, backend) {
-                Ok(code) => out.push_str(&format!("    {}\n", code)),
-                Err(e)   => out.push_str(&format!("    compile_error!(\"{}\")\n", e)),
+                // A unit-typed function (`-> ()`, including `main`) must not
+                // place its sole builtin call in tail-expression position: a
+                // builtin's emitted Rust code can evaluate to a non-unit
+                // value (e.g. `close`'s `{ ...; 0i32 }`), which would then
+                // conflict with the function's declared `()` return type.
+                // A statement (semicolon, discarded) matches the same
+                // reasoning as the last-pipe-with-no-binding case above.
+                Ok(code) if returns_unit => out.push_str(&format!("    {};\n", code)),
+                Ok(code)                 => out.push_str(&format!("    {}\n", code)),
+                Err(e)                   => out.push_str(&format!("    compile_error!(\"{}\")\n", e)),
             }
         }
     }

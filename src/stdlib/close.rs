@@ -46,7 +46,7 @@ pub fn emit(params: &[Param], backend: &Backend) -> Result<String, String> {
         // syscall.Close returns an error; normalise to 0 / -1.
         Backend::Go => format!(
             "func() int32 {{\
-               if __err := syscall.Close(uintptr({fd})); __err != nil {{ return -1 }}\
+               if __err := syscall.Close(int({fd})); __err != nil {{ return -1 }}\
                return 0\
              }}()"
         ),

@@ -37,12 +37,25 @@ fn collect_c_includes(file: &SourceFile) -> Vec<&'static str> {
 }
 
 pub(crate) fn collect_builtin_names_c<'a>(body: &'a BulletBody, out: &mut BTreeSet<&'a str>) {
-    if let BulletBody::Pipes(pipes) = body {
-        for pipe in pipes {
-            if let Expr::Atom(Atom::BuiltinNoArgs(name)) = &pipe.expr {
-                out.insert(name.as_str());
+    match body {
+        BulletBody::Pipes(pipes) => {
+            for pipe in pipes {
+                if let Expr::Atom(Atom::BuiltinNoArgs(name)) = &pipe.expr {
+                    out.insert(name.as_str());
+                }
             }
         }
+        // The bare shorthand form: a function whose entire body is just one
+        // builtin call (e.g. `-> builtin::close`), no pipe syntax at all.
+        // Previously unhandled here — a function using this form would
+        // silently miss its required #includes, hoisted static helper, and
+        // foreign_types.h detection (all three consumers below share this
+        // function), even though codegen_c.rs's emit_body_c/emit_body_cpp
+        // correctly emit a call to it.
+        BulletBody::Builtin(name) => {
+            out.insert(name.as_str());
+        }
+        BulletBody::Natives(_) => {}
     }
 }
 
@@ -86,13 +99,19 @@ fn emit_c_helpers(out: &mut String, file: &SourceFile) {
 // ── Void-returning callee detection ─────────────────────────────────────────
 
 /// True if `ty` is Bullang's unit type `()`.
-fn type_is_unit(ty: &BuType) -> bool {
+///
+/// pub(crate): also used by codegen.rs (Rust) — same check, needed there to
+/// fix the analogous BulletBody::Builtin(name) shorthand bug (a unit-typed
+/// function whose sole body is a builtin call must not emit that call as a
+/// tail expression when the builtin's Rust code evaluates to a non-unit
+/// value, e.g. `close`'s `{ ...; 0i32 }`).
+pub(crate) fn type_is_unit(ty: &BuType) -> bool {
     matches!(ty, BuType::Named(s) if s == "()")
 }
 
 /// True if `func`'s declared Bullang return type is unit (including no
 /// declared output at all, which defaults to unit).
-fn output_is_unit(func: &Bullet) -> bool {
+pub(crate) fn output_is_unit(func: &Bullet) -> bool {
     match &func.output {
         None    => true,
         Some(o) => type_is_unit(&o.ty),
@@ -705,8 +724,16 @@ pub fn emit_body_c(out: &mut String, body: &BulletBody, params: &[Param], backen
         BulletBody::Builtin(name) => {
             use crate::stdlib;
             match stdlib::emit_builtin(name, params, backend) {
-                Ok(code) => out.push_str(&format!("    return {};\n", code)),
-                Err(e)   => out.push_str(&format!("    /* ERROR: {} */\n", e)),
+                // A unit-returning function (`-> ()`, including `main`)
+                // never turns its sole builtin call into `return expr;` —
+                // same reasoning as the `i == last && !returns_unit` branch
+                // in the Pipes path above. A bare statement here is safe
+                // from -Wunused-value as long as the builtin itself has no
+                // needless cast wrapping its result (see fd_out.rs, open.rs,
+                // time.rs).
+                Ok(code) if returns_unit => out.push_str(&format!("    {};\n", code)),
+                Ok(code)                 => out.push_str(&format!("    return {};\n", code)),
+                Err(e)                   => out.push_str(&format!("    /* ERROR: {} */\n", e)),
             }
         }
     }

@@ -57,7 +57,7 @@ pub fn emit(params: &[Param], backend: &Backend) -> Result<String, String> {
         Backend::Go => format!(
             "func() int32 {{ \
                __b := []byte({content}); \
-               __n, __err := syscall.Write(uintptr({fd}), __b); \
+               __n, __err := syscall.Write(int({fd}), __b); \
                if __err != nil {{ return -1 }} \
                return int32(__n); \
              }}()"
