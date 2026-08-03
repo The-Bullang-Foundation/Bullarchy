@@ -274,7 +274,6 @@ fn builtin_imports(name: &str, imports: &mut Vec<&'static str>) {
         "close" | "out" => { push_unique(imports, "syscall"); }
         "in" => {
             push_unique(imports, "os");
-            push_unique(imports, "bufio");
             push_unique(imports, "strings");
             push_unique(imports, "runtime");
         }

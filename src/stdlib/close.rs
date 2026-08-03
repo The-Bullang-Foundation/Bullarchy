@@ -3,7 +3,7 @@ use bullang::ast::{Backend, Param};
 pub const META: (&str, &str, &str) = (
     "close",
     "(fd: i32)                 → i32",
-    "Close a file descriptor. Returns 0 on success, -1 on error",
+    "Close a file descriptor. Returns 0 on success, -1 on error (Python: raises OSError on error instead; Java: only fds 0/1/2 are supported — needs JNI for arbitrary fds)",
 );
 
 pub fn emit(params: &[Param], backend: &Backend) -> Result<String, String> {
@@ -24,15 +24,15 @@ pub fn emit(params: &[Param], backend: &Backend) -> Result<String, String> {
         ),
 
         // ── Python ───────────────────────────────────────────────────────────
-        // os.close returns None; normalise to 0 / -1.
+        // Deviates from the documented "-1 on error" contract: Python has no
+        // try/except in expression position and this backend has no hoisting
+        // mechanism to define a real helper function, so catching the error
+        // to return -1 isn't cleanly possible here. os.close() failing
+        // raises OSError naturally instead — idiomatic Python, unlike Rust's
+        // silent-0 deviation above.
         Backend::Python => {
             let fd = super::py_esc(fd);
-            format!(
-                "(lambda __os, __fd: \
-                   (lambda __r: 0)(__os.close(__fd)) \
-                   if True else -1\
-                 )(__import__('os'), {fd})"
-            )
+            format!("(lambda __os: (__os.close({fd}), 0)[1])(__import__('os'))")
         }
 
         // ── C ────────────────────────────────────────────────────────────────
@@ -51,9 +51,22 @@ pub fn emit(params: &[Param], backend: &Backend) -> Result<String, String> {
              }}()"
         ),
 
-        Backend::Java    => format!(
+        // ── Java ─────────────────────────────────────────────────────────────
+        // Was previously a complete no-op — ignored fd entirely and always
+        // returned 0. Java has no idiomatic public API for arbitrary raw OS
+        // file descriptors, so this now only supports the conventional fds
+        // 0/1/2 (stdin/stdout/stderr), closed the idiomatic way via their
+        // own .close() methods — any other fd is honestly unsupported
+        // (returns -1) rather than silently pretending to succeed. Real
+        // arbitrary-fd support needs a JNI native-library follow-up.
+        Backend::Java => format!(
             "((java.util.function.IntSupplier)(() -> {{ \
-               try {{ return 0; }} catch (Exception __e) {{ return -1; }} \
+               try {{ \
+                 if (({fd}) == 0) {{ System.in.close(); return 0; }} \
+                 if (({fd}) == 1) {{ System.out.close(); return 0; }} \
+                 if (({fd}) == 2) {{ System.err.close(); return 0; }} \
+                 return -1; \
+               }} catch (java.io.IOException __e) {{ return -1; }} \
              }})).getAsInt()"
         ),
         Backend::Unknown(kw) => return Err(format!(

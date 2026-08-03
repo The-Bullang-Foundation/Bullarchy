@@ -3,7 +3,7 @@ use bullang::ast::{Backend, Param};
 pub const META: (&str, &str, &str) = (
     "open",
     "(path: String, mode: String) → i32",
-    "Open a file — mode: \"r\" | \"w\" | \"a\" | \"rw\". Returns fd (i32), -1 on error",
+    "Open a file — mode: \"r\" | \"w\" | \"a\" | \"rw\". Returns fd (i32), -1 on error (Java: not yet supported, always returns -1 — needs JNI for arbitrary fds)",
 );
 
 // Mode string convention (same across all backends):
@@ -102,31 +102,17 @@ pub fn emit(params: &[Param], backend: &Backend) -> Result<String, String> {
              }}()"
         ),
 
-        Backend::Java    => format!(
-            "((java.util.function.IntSupplier)(() -> {{ \
-               try {{ \
-                 java.nio.file.OpenOption[] __opts; \
-                 switch ({mode}) {{ \
-                   case \"r\":  __opts = new java.nio.file.OpenOption[]{{ \
-                     java.nio.file.StandardOpenOption.READ }}; break; \
-                   case \"w\":  __opts = new java.nio.file.OpenOption[]{{ \
-                     java.nio.file.StandardOpenOption.WRITE, \
-                     java.nio.file.StandardOpenOption.CREATE, \
-                     java.nio.file.StandardOpenOption.TRUNCATE_EXISTING }}; break; \
-                   case \"a\":  __opts = new java.nio.file.OpenOption[]{{ \
-                     java.nio.file.StandardOpenOption.WRITE, \
-                     java.nio.file.StandardOpenOption.CREATE, \
-                     java.nio.file.StandardOpenOption.APPEND }}; break; \
-                   default:   __opts = new java.nio.file.OpenOption[]{{ \
-                     java.nio.file.StandardOpenOption.READ }}; \
-                 }} \
-                 java.nio.channels.FileChannel __fc = java.nio.channels.FileChannel.open( \
-                   java.nio.file.Paths.get({path}), __opts); \
-                 return (int)__fc.hashCode(); \
-               }} catch (Exception __e) {{ return -1; }} \
-             }})).getAsInt()",
-            path = path, mode = mode
-        ),
+        // ── Java ─────────────────────────────────────────────────────────────
+        // Was previously misleading: opened a real file via FileChannel but
+        // returned its hashCode() as a fake "fd" — a value with no relation
+        // to an OS file descriptor, unusable by close/in/out (which now
+        // only handle the conventional fds 0/1/2 anyway). Java has no
+        // idiomatic public API for arbitrary raw OS file descriptors, so
+        // this honestly returns -1 (not-yet-supported) rather than opening
+        // a file and handing back a number that doesn't work. Real support
+        // needs a JNI native-library follow-up — see close/in/out's Java
+        // arms, which already handle stdin/stdout/stderr idiomatically.
+        Backend::Java => "-1".to_string(),
         Backend::Unknown(kw) => return Err(format!(
             "'builtin::open' is not available for unknown backend '{kw}'"
         )),
