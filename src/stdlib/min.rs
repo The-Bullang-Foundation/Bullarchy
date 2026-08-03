@@ -33,13 +33,13 @@ pub fn emit(params: &[Param], backend: &Backend) -> Result<String, String> {
         // is the correct approach here, not a reinvented wheel.
         Backend::C => format!(
             "({{ \
-               vec_t *__src = {arr}; \
-               size_t __n = vec_len(__src); \
+               vec_t __src = {arr}; \
+               size_t __n = vec_len(&__src); \
                int64_t __m = INT64_MIN; \
                if (__n > 0) {{ \
-                 __m = *(int64_t *)vec_get(__src, 0); \
+                 __m = *(int64_t *)vec_get(&__src, 0); \
                  for (size_t __i = 1; __i < __n; __i++) {{ \
-                   int64_t __v = *(int64_t *)vec_get(__src, __i); \
+                   int64_t __v = *(int64_t *)vec_get(&__src, __i); \
                    if (__v < __m) __m = __v; \
                  }} \
                }} \

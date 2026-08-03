@@ -23,18 +23,19 @@ pub fn emit(params: &[Param], backend: &Backend) -> Result<String, String> {
 
         // ── C ────────────────────────────────────────────────────────────────
         // Reads from Bullang-managed globals set by the emitted main().
-        // Returns a heap-allocated vec_t* of char* (each string is argv[i]) —
-        // heap, not a local vec_t by value, because the returned pointer has
-        // to outlive this function's own stack frame, and every other
-        // builtin that consumes a Vec[T] (max, min) expects a vec_t*.
+        // Returns a vec_t by value — Vec[T] is a value type in C (mirrors
+        // Rust's Vec<T>, itself a by-value binding despite owning a heap
+        // buffer internally). Only the vec_t struct's own data pointer/len/
+        // cap fields are copied out on return; the backing element buffer
+        // vec_push grows stays correctly heap-allocated via vec_t's own
+        // data pointer, same as any other vec_t returned by value.
         Backend::C => "\
 ({\
-  vec_t *__args = malloc(sizeof(vec_t));\
-  *__args = vec_new(sizeof(char *));\
+  vec_t __args = vec_new(sizeof(char *));\
   extern int   __bu_argc;\
   extern char **__bu_argv;\
   for (int __i = 1; __i < __bu_argc; __i++)\
-    vec_push(__args, &__bu_argv[__i]);\
+    vec_push(&__args, &__bu_argv[__i]);\
   __args;\
 })".to_string(),
 
