@@ -100,7 +100,7 @@ pub fn required_imports(name: &str, backend: &Backend) -> Vec<&'static str> {
         return Vec::new();
     }
     match name {
-        "in"  => vec!["use std::io::{BufRead, BufReader};", "use std::os::unix::io::FromRawFd;"],
+        "in"  => vec!["use std::io::Read;", "use std::os::unix::io::FromRawFd;"],
         "out" => vec!["use std::io::Write;", "use std::os::unix::io::FromRawFd;", "use std::mem::ManuallyDrop;"],
         "open" => vec!["use std::os::unix::io::IntoRawFd;"],
         _ => Vec::new(),

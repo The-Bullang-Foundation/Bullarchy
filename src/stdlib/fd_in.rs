@@ -16,17 +16,33 @@ pub fn emit(params: &[Param], backend: &Backend) -> Result<String, String> {
 
     Ok(match backend {
         // ── Rust ─────────────────────────────────────────────────────────────
-        // Wraps the raw fd in a BufReader; reads one line; strips the newline.
+        // Reads byte-by-byte, NOT via BufReader — a BufReader would fill its
+        // internal buffer (~8KB) with a single read(2) syscall, silently
+        // discarding anything past the first line when it's dropped at the
+        // end of this block. Since a fresh reader is created on every
+        // builtin::in() call (no persisted state), that would lose data on
+        // any repeated call over the same fd — the normal "read lines in a
+        // loop" usage. Byte-by-byte guarantees only the returned line's
+        // bytes (plus the trailing newline) are ever consumed from the fd,
+        // matching the C/C++ arms below.
         // The fd is NOT closed here — ownership stays with the caller.
         Backend::Rust => format!(
             "{{\
                let __fd = {fd};\
-               let __f  = unsafe {{ std::fs::File::from_raw_fd(__fd) }};\
-               let mut __r   = BufReader::new(&__f);\
+               let mut __f = unsafe {{ std::fs::File::from_raw_fd(__fd) }};\
                let mut __line = String::new();\
-               let _ = __r.read_line(&mut __line);\
+               let mut __byte = [0u8; 1];\
+               loop {{\
+                 match __f.read(&mut __byte) {{\
+                   Ok(0) | Err(_) => break,\
+                   Ok(_) => {{\
+                     if __byte[0] == b'\\n' {{ break; }}\
+                     __line.push(__byte[0] as char);\
+                   }}\
+                 }}\
+               }}\
                std::mem::forget(__f);\
-               __line.trim_end_matches('\\n').trim_end_matches('\\r').to_owned()\
+               __line.trim_end_matches('\\r').to_owned()\
              }}"
         ),
 
