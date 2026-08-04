@@ -18,7 +18,7 @@ use crate::validator::{self, AllErrors};
 use crate::{build, codegen, typecheck};
 use bullang::parser;
 use crate::utils::{current_dir, read_file, find_root_from, find_root_from_probe,
-                   print_all_errors, print_type_errors};
+                   print_all_errors, print_type_errors, format_source};
 use crate::readme::delete_project_readme;
 
 // ── Short extension set ───────────────────────────────────────────────────────
@@ -350,35 +350,4 @@ fn write_or_exit(path: &Path, content: String) {
         eprintln!("error writing {}: {}", path.display(), e);
         std::process::exit(1);
     });
-}
-
-/// Run the appropriate code formatter on generated source files.
-/// Falls back silently to unformatted content if the formatter is not installed.
-fn format_source(path: &Path, content: &str) -> Option<String> {
-    let ext = path.extension()?.to_str()?;
-    match ext {
-        "rs"              => run_formatter(&["rustfmt", "--edition", "2024"], content),
-        "py"              => run_formatter(&["black", "-q", "-"], content),
-        "go"              => run_formatter(&["gofmt"], content),
-        "c" | "cpp" | "h" | "hpp" => run_formatter(&["clang-format", "--style=LLVM"], content),
-        _                 => None,
-    }
-}
-
-fn run_formatter(cmd: &[&str], content: &str) -> Option<String> {
-    use std::io::Write;
-    let mut child = std::process::Command::new(cmd[0])
-        .args(&cmd[1..])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .ok()?;
-    child.stdin.take()?.write_all(content.as_bytes()).ok()?;
-    let output = child.wait_with_output().ok()?;
-    if output.status.success() && !output.stdout.is_empty() {
-        String::from_utf8(output.stdout).ok()
-    } else {
-        None
-    }
 }

@@ -114,3 +114,57 @@ pub fn print_type_errors(errors: &[typecheck::TypeError]) {
     eprintln!();
     eprintln!("{} type error(s) in {} file(s)", total, file_count);
 }
+
+// ── Generated-source formatting ─────────────────────────────────────────────
+
+/// Run the appropriate code formatter on a generated source file, keyed by
+/// its extension. Shared by `build` and `convert` so both stay in sync.
+/// Falls back to unformatted content if the formatter isn't installed or
+/// fails — but tells the user why on stderr, rather than silently leaving
+/// them with unreadable one-line output and no explanation.
+pub fn format_source(path: &Path, content: &str) -> Option<String> {
+    let ext = path.extension()?.to_str()?;
+    match ext {
+        "rs" => run_formatter(&["rustfmt", "--edition", "2024"], content),
+        "py" => run_formatter(&["black", "-q", "-"], content),
+        "go" => run_formatter(&["gofmt"], content),
+        "c" | "cpp" | "h" | "hpp" => run_formatter(&["clang-format", "--style=LLVM"], content),
+        "java" => run_formatter(&["google-java-format", "-"], content),
+        _ => None,
+    }
+}
+
+fn run_formatter(cmd: &[&str], content: &str) -> Option<String> {
+    use std::io::Write;
+
+    let mut child = match std::process::Command::new(cmd[0])
+        .args(&cmd[1..])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(_) => {
+            eprintln!(
+                "warning: `{}` not found — generated output will be unformatted \
+                 (install it for readable output)",
+                cmd[0]
+            );
+            return None;
+        }
+    };
+
+    child.stdin.take()?.write_all(content.as_bytes()).ok()?;
+    let output = child.wait_with_output().ok()?;
+
+    if output.status.success() && !output.stdout.is_empty() {
+        String::from_utf8(output.stdout).ok()
+    } else {
+        eprintln!(
+            "warning: `{}` failed to format generated output — leaving it unformatted",
+            cmd[0]
+        );
+        None
+    }
+}
