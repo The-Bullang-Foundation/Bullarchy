@@ -12,4 +12,3 @@ pub use codegen_cpp::*;
 pub use codegen_go::*;
 pub use codegen_java::*;
 pub use codegen_python::*;
-pub use typeinfer::*;
