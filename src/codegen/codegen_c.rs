@@ -41,9 +41,10 @@ pub(crate) fn collect_builtin_names_c<'a>(body: &'a BulletBody, out: &mut BTreeS
     match body {
         BulletBody::Pipes(pipes) => {
             for pipe in pipes {
-                if let Expr::Atom(Atom::BuiltinNoArgs(name)) = &pipe.expr {
-                    out.insert(name.as_str());
+                for input in &pipe.inputs {
+                    collect_builtin_names_from_expr(input, out);
                 }
+                collect_builtin_names_from_expr(&pipe.expr, out);
             }
         }
         // The bare shorthand form: a function whose entire body is just one
@@ -57,6 +58,51 @@ pub(crate) fn collect_builtin_names_c<'a>(body: &'a BulletBody, out: &mut BTreeS
             out.insert(name.as_str());
         }
         BulletBody::Natives(_) => {}
+    }
+}
+
+/// `pipe.expr` (and `pipe.inputs`) can be the bare `BuiltinNoArgs` form
+/// (`|> builtin::to_upper`) or the explicit-args `BuiltinExpr` form
+/// (`builtin::open(path, mode)`) — the only form some builtins like `open`
+/// support at all, since they take more than one argument. Previously only
+/// `BuiltinNoArgs` was recognised here, so e.g. `builtin::open(path, mode)`
+/// silently produced C output missing `<fcntl.h>`/`<sys/stat.h>` (compiles
+/// only by luck, or fails under -Wall -Werror). Recurses into nested
+/// expressions (builtin args, unary operands, index/slice bounds) so a
+/// builtin call buried inside another expression is still found.
+fn collect_builtin_names_from_expr<'a>(expr: &'a Expr, out: &mut BTreeSet<&'a str>) {
+    match expr {
+        Expr::Atom(a)   => collect_builtin_names_from_atom(a, out),
+        Expr::BinOp(b)  => {
+            collect_builtin_names_from_atom(&b.lhs, out);
+            collect_builtin_names_from_atom(&b.rhs, out);
+        }
+        Expr::Tuple(items) => {
+            for item in items {
+                collect_builtin_names_from_expr(item, out);
+            }
+        }
+    }
+}
+
+fn collect_builtin_names_from_atom<'a>(atom: &'a Atom, out: &mut BTreeSet<&'a str>) {
+    match atom {
+        Atom::BuiltinNoArgs(name) => {
+            out.insert(name.as_str());
+        }
+        Atom::BuiltinExpr { name, args } => {
+            out.insert(name.as_str());
+            for arg in args {
+                collect_builtin_names_from_expr(arg, out);
+            }
+        }
+        Atom::Unary { rhs, .. }  => collect_builtin_names_from_atom(rhs, out),
+        Atom::Index { idx, .. }  => collect_builtin_names_from_expr(idx, out),
+        Atom::Slice { from, to, .. } => {
+            collect_builtin_names_from_expr(from, out);
+            collect_builtin_names_from_expr(to, out);
+        }
+        _ => {}
     }
 }
 

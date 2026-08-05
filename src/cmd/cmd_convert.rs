@@ -272,7 +272,16 @@ fn print_next_steps(backend: &Backend, out_dir: &Path, crate_name: &str) {
         Backend::C      => println!("to compile:\n  cd {} && make", out_dir.display()),
         Backend::Cpp    => println!("to compile:\n  cd {} && make", out_dir.display()),
         Backend::Go     => println!("to run:\n  cd {} && go run .", out_dir.display()),
-        Backend::Java   => println!("to compile:\n  cd {} && javac *.java && java Main", out_dir.display()),
+        Backend::Java   => {
+            if out_dir.join("BuNative.java").exists() {
+                println!(
+                    "to compile:\n  cd {} && make -f Makefile.native && javac *.java && java -Djava.library.path=. Main",
+                    out_dir.display()
+                );
+            } else {
+                println!("to compile:\n  cd {} && javac *.java && java Main", out_dir.display());
+            }
+        }
         Backend::Unknown(kw) => eprintln!("error: unknown backend '{}'", kw),
     }
 }

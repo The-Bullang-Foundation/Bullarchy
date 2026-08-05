@@ -3,7 +3,7 @@ use bullang::ast::{Backend, Param};
 pub const META: (&str, &str, &str) = (
     "open",
     "(path: String, mode: String) → i32",
-    "Open a file — mode: \"r\" | \"w\" | \"a\" | \"rw\". Returns fd (i32), -1 on error (Java: not yet supported, always returns -1 — needs JNI for arbitrary fds)",
+    "Open a file — mode: \"r\" | \"w\" | \"a\" | \"rw\". Returns fd (i32), -1 on error (Java: delegates to the JNI BuNative library — see close/in/out's Java arms and Makefile.native, emitted automatically when this builtin is used)",
 );
 
 // Mode string convention (same across all backends):
@@ -105,14 +105,14 @@ pub fn emit(params: &[Param], backend: &Backend) -> Result<String, String> {
         // ── Java ─────────────────────────────────────────────────────────────
         // Was previously misleading: opened a real file via FileChannel but
         // returned its hashCode() as a fake "fd" — a value with no relation
-        // to an OS file descriptor, unusable by close/in/out (which now
-        // only handle the conventional fds 0/1/2 anyway). Java has no
-        // idiomatic public API for arbitrary raw OS file descriptors, so
-        // this honestly returns -1 (not-yet-supported) rather than opening
-        // a file and handing back a number that doesn't work. Real support
-        // needs a JNI native-library follow-up — see close/in/out's Java
-        // arms, which already handle stdin/stdout/stderr idiomatically.
-        Backend::Java => "-1".to_string(),
+        // to an OS file descriptor, unusable by close/in/out. Java has no
+        // idiomatic *public* API for arbitrary raw OS file descriptors, so
+        // this now delegates to BuNative, a small JNI native library
+        // (bu_native.c + Makefile.native) generated automatically alongside
+        // the project whenever open/close/in/out are used — see
+        // codegen_jni.rs. open() always needs it, since there's no fast
+        // stdio path for a call whose whole point is opening a new file.
+        Backend::Java => format!("BuNative.nOpen({path}, {mode})"),
         Backend::Unknown(kw) => return Err(format!(
             "'builtin::open' is not available for unknown backend '{kw}'"
         )),

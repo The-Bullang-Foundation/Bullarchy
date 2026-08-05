@@ -3,6 +3,7 @@ pub mod codegen_c;
 pub mod codegen_cpp;
 pub mod codegen_go;
 pub mod codegen_java;
+pub mod codegen_jni;
 pub mod codegen_python;
 pub mod typeinfer;
 
@@ -11,4 +12,5 @@ pub use codegen_c::*;
 pub use codegen_cpp::*;
 pub use codegen_go::*;
 pub use codegen_java::*;
+pub use codegen_jni::*;
 pub use codegen_python::*;

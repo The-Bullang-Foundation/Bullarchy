@@ -140,6 +140,19 @@ pub fn build(root: &Path, out_dir: &Path, crate_name: &str, backend: &Backend) -
                     &mut files_written,
                 );
             }
+
+            // BuNative.java / bu_native.c / Makefile.native — only when the
+            // project actually calls open/close/in/out somewhere. Static
+            // templates (see codegen_jni.rs), copied in verbatim.
+            let all_sources = collect_all_sources(root);
+            let all_main_sources = collect_all_main_sources(root);
+            let needs_jni = all_sources.iter().any(|(_, sf)| codegen::needs_jni_java(sf))
+                || all_main_sources.iter().any(|sf| codegen::needs_jni_java(sf));
+            if needs_jni {
+                write_file(&out_dir.join("BuNative.java"), codegen::BU_NATIVE_JAVA, &mut files_written);
+                write_file(&out_dir.join("bu_native.c"), codegen::BU_NATIVE_C, &mut files_written);
+                write_file(&out_dir.join("Makefile.native"), codegen::MAKEFILE_NATIVE, &mut files_written);
+            }
         }
         Backend::Unknown(_) => {}
     }
@@ -510,6 +523,26 @@ fn collect_all_natives(dir: &Path) -> Vec<bullang::ast::NativeBlock> {
     }
     for subdir in collect_subdirs(dir) {
         result.extend(collect_all_natives(&subdir));
+    }
+    result
+}
+
+/// `collect_all_sources` only walks `inv.entries` — main.bu is discovered
+/// separately (via `main_bu_path`) and never appears in `entries`, so any
+/// caller needing *every* source file in the tree (not just non-main ones)
+/// has to also walk main.bu explicitly. Used by the Java backend's JNI
+/// detection, since a project's only code is very often just main.bu.
+fn collect_all_main_sources(dir: &Path) -> Vec<bullang::ast::SourceFile> {
+    let mut result = Vec::new();
+    if let Some(mp) = main_bu_path(dir) {
+        if let Ok(source) = std::fs::read_to_string(&mp) {
+            if let Ok(bullang::ast::BuFile::Source(sf)) = parser::parse_file(&source, false) {
+                result.push(sf);
+            }
+        }
+    }
+    for subdir in collect_subdirs(dir) {
+        result.extend(collect_all_main_sources(&subdir));
     }
     result
 }

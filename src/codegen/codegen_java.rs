@@ -174,16 +174,54 @@ fn emit_body_java(
         BulletBody::Pipes(pipes) => {
             if pipes.is_empty() { return; }
             let last = pipes.len().saturating_sub(1);
+            // Unlike C's `__arg_N` (scoped inside that pipe's own GNU
+            // statement-expression), Java temps below land as plain
+            // statements in the shared method body — so the counter has to
+            // be unique across the whole method, not reset per pipe.
+            let mut tmp_counter: usize = 0;
             for (i, pipe) in pipes.iter().enumerate() {
                 // Handle builtin::name with implicit pipe inputs
                 let expr_str = if let Expr::Atom(Atom::BuiltinNoArgs(name)) = &pipe.expr {
                     let synthetic_params: Vec<bullang::ast::Param> = pipe.inputs
                         .iter()
-                        .enumerate()
-                        .map(|(idx, input)| {
+                        .map(|input| {
                             let param_name = match input {
                                 Expr::Atom(Atom::Ident(s)) => s.clone(),
-                                _ => format!("__pipe_arg_{}", idx),
+                                // Atomic literals are safe to splice
+                                // directly with no temp needed — and doing
+                                // so keeps their literal-ness visible to
+                                // callers like close/fd_in/fd_out's Java
+                                // arms, which special-case a literal fd of
+                                // 0/1/2 to skip referencing BuNative
+                                // entirely. Hoisting these into a temp (as
+                                // the fallback below does) would still be
+                                // correct but would hide that literal-ness
+                                // behind a variable name, silently forcing
+                                // every project that ever passes a bare
+                                // `1`/`2` fd into requiring the native lib.
+                                Expr::Atom(Atom::Integer(_))
+                                | Expr::Atom(Atom::Float(_))
+                                | Expr::Atom(Atom::StringLit(_)) => emit_expr_java(input),
+                                // Anything else (a field access, a nested
+                                // call, ...) — declare a real temporary
+                                // above the call and reference that instead.
+                                // Previously this fell back to a made-up
+                                // `__pipe_arg_N` name with no matching
+                                // declaration anywhere, so any multi-arg
+                                // implicit call with a non-ident input (e.g.
+                                // `(path, "w"): builtin::open`) produced
+                                // Java that referenced an undefined
+                                // variable — see codegen_c.rs's equivalent
+                                // block, which already does this correctly.
+                                _ => {
+                                    let tmp = format!("__arg_{}", tmp_counter);
+                                    tmp_counter += 1;
+                                    out.push_str(&format!(
+                                        "        var {} = {};\n",
+                                        tmp, emit_expr_java(input)
+                                    ));
+                                    tmp
+                                }
                             };
                             bullang::ast::Param {
                                 name: param_name,

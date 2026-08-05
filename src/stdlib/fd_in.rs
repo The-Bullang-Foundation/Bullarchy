@@ -3,7 +3,7 @@ use bullang::ast::{Backend, Param};
 pub const META: (&str, &str, &str) = (
     "in",
     "(fd: i32)                 → String",
-    "Read one line from a file descriptor (newline stripped). Empty string on EOF/error (Java: only fd 0/stdin is supported — needs JNI for arbitrary fds)",
+    "Read one line from a file descriptor (newline stripped). Empty string on EOF/error (Java: fd 0/stdin uses System.in directly, other fds delegate to the JNI BuNative library)",
 );
 
 // File name is fd_in.rs because `in` is a Rust reserved keyword and cannot
@@ -131,15 +131,34 @@ pub fn emit(params: &[Param], backend: &Backend) -> Result<String, String> {
         // Was previously broken: ignored the fd parameter entirely and
         // always read from java.io.FileDescriptor.in (stdin) regardless of
         // what was passed, via dead/unused reflection scaffolding that
-        // wasn't even wired up. Java has no idiomatic public API for
-        // arbitrary raw OS file descriptors, so this now only supports the
-        // conventional fd 0 (stdin), handled the fully idiomatic way via
-        // System.in — any other fd is honestly unsupported (returns "")
-        // rather than silently reading stdin anyway. Real arbitrary-fd
-        // support needs a JNI native-library follow-up.
+        // wasn't even wired up. fd 0 (stdin) keeps the fast, zero-setup
+        // idiomatic path via System.in — no native library needed just to
+        // read stdin. Any other fd falls through to BuNative (JNI),
+        // generated automatically whenever this builtin is used — see
+        // codegen_jni.rs.
+        //
+        // When fd's source text is literally "0" (not just a variable that
+        // happens to hold 0 at runtime), the BuNative branch is dropped
+        // entirely rather than left in as dead code — a project that never
+        // calls builtin::open won't have BuNative.java generated at all
+        // (see codegen_jni.rs), so a stray reference to it in unreachable
+        // code would still fail to compile.
+        Backend::Java if fd.trim() == "0" => "((java.util.function.Supplier<String>)(() -> { \
+               try { \
+                 StringBuilder __sb = new StringBuilder(); \
+                 int __ch; \
+                 while ((__ch = System.in.read()) != -1) { \
+                   if (__ch == '\\n') break; \
+                   __sb.append((char) __ch); \
+                 } \
+                 String __line = __sb.toString(); \
+                 if (__line.endsWith(\"\\r\")) __line = __line.substring(0, __line.length() - 1); \
+                 return __line; \
+               } catch (java.io.IOException __e) { return \"\"; } \
+             })).get()".to_string(),
         Backend::Java => format!(
             "((java.util.function.Supplier<String>)(() -> {{ \
-               if (({fd}) != 0) return \"\"; \
+               if (({fd}) != 0) return BuNative.nIn({fd}); \
                try {{ \
                  StringBuilder __sb = new StringBuilder(); \
                  int __ch; \

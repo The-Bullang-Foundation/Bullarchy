@@ -1,0 +1,33 @@
+# Makefile.native — builds the JNI native library bu_native.c implements.
+# Run once per platform: make -f Makefile.native
+#
+# Only needed if this project calls builtin::open, or calls
+# builtin::close/in/out on a fd that isn't 0/1/2 — everything else (stdin/
+# stdout/stderr) works with plain `javac *.java` and no native step.
+
+CC     = cc
+CFLAGS = -Wall -Werror -Wextra -std=c11 -fPIC -O2
+
+UNAME := $(shell uname -s)
+
+ifeq ($(UNAME),Darwin)
+    JAVA_HOME  ?= $(shell /usr/libexec/java_home)
+    TARGET      = libbullang_native.dylib
+    LDFLAGS     = -dynamiclib
+    JNI_INCLUDE = -I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/darwin
+else
+    JAVA_HOME  ?= $(shell dirname $$(dirname $$(readlink -f $$(command -v javac))))
+    TARGET      = libbullang_native.so
+    LDFLAGS     = -shared
+    JNI_INCLUDE = -I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/linux
+endif
+
+all: $(TARGET)
+
+$(TARGET): bu_native.c
+	$(CC) $(CFLAGS) $(JNI_INCLUDE) $(LDFLAGS) -o $@ $<
+
+clean:
+	rm -f $(TARGET)
+
+.PHONY: all clean
