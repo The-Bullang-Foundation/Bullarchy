@@ -394,20 +394,45 @@ fn emit_body_go(out: &mut String, body: &BulletBody, params: &[Param], output: &
             if pipes.is_empty() { return; }
             let last = pipes.len().saturating_sub(1);
             let mut env = TypeEnv::seed(params, fn_outputs);
+            // Counter has to be unique across the whole function body, not
+            // reset per pipe: Go's `:=` requires at least one new variable
+            // on the left side, so reusing `__arg_0` for a second pipe
+            // in the same function is a hard compile error ("no new
+            // variables on left side of :="), unlike Python/Java where
+            // reassignment is fine either way.
+            let mut tmp_counter: usize = 0;
             for (i, pipe) in pipes.iter().enumerate() {
                 // Handle builtin::name with implicit pipe inputs
                 let expr_str = if let Expr::Atom(Atom::BuiltinNoArgs(name)) = &pipe.expr {
                     let synthetic_params: Vec<bullang::ast::Param> = pipe.inputs
                         .iter()
-                        .enumerate()
-                        .map(|(idx, input)| {
+                        .map(|input| {
+                            let inferred_ty = env.infer(input);
                             let param_name = match input {
                                 Expr::Atom(Atom::Ident(s)) => s.clone(),
-                                _ => format!("__pipe_arg_{}", idx),
+                                // Not a plain variable — declare a real
+                                // temporary above the call and reference
+                                // that instead. Previously this fell back to
+                                // a made-up `__pipe_arg_N` name with no
+                                // matching declaration anywhere, so any
+                                // multi-arg implicit call with a non-ident
+                                // input (e.g. `(path, "w"): builtin::open`)
+                                // produced Go that referenced an undefined
+                                // variable — see codegen_c.rs's equivalent
+                                // block, which already does this correctly.
+                                _ => {
+                                    let tmp = format!("__arg_{}", tmp_counter);
+                                    tmp_counter += 1;
+                                    out.push_str(&format!(
+                                        "\t{} := {}\n",
+                                        tmp, emit_expr_go(input)
+                                    ));
+                                    tmp
+                                }
                             };
                             bullang::ast::Param {
                                 name: param_name,
-                                ty:   env.infer(input),
+                                ty:   inferred_ty,
                             }
                         })
                         .collect();

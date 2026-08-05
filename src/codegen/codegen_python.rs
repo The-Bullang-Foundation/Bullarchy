@@ -169,16 +169,41 @@ fn emit_body_py(out: &mut String, body: &BulletBody, params: &[Param]) {
                 return;
             }
             let last = pipes.len().saturating_sub(1);
+            // Counter has to be unique across the whole function body, not
+            // reset per pipe — see the matching comment in emit_body_go,
+            // where reusing a name is a hard compile error. Python doesn't
+            // require this (plain `=` tolerates reassignment) but keeping
+            // the same convention avoids confusing reused temp names in
+            // generated output across pipes.
+            let mut tmp_counter: usize = 0;
             for (i, pipe) in pipes.iter().enumerate() {
                 // Handle builtin::name with implicit pipe inputs
                 let expr_str = if let Expr::Atom(Atom::BuiltinNoArgs(name)) = &pipe.expr {
                     let synthetic_params: Vec<bullang::ast::Param> = pipe.inputs
                         .iter()
-                        .enumerate()
-                        .map(|(idx, input)| {
+                        .map(|input| {
                             let param_name = match input {
                                 Expr::Atom(Atom::Ident(s)) => s.clone(),
-                                _ => format!("__pipe_arg_{}", idx),
+                                // Not a plain variable — declare a real
+                                // temporary above the call and reference
+                                // that instead. Previously this fell back to
+                                // a made-up `__pipe_arg_N` name with no
+                                // matching declaration anywhere, so any
+                                // multi-arg implicit call with a non-ident
+                                // input (e.g. `(path, "w"): builtin::open`)
+                                // produced Python that referenced an
+                                // undefined name — see codegen_c.rs's
+                                // equivalent block, which already does this
+                                // correctly.
+                                _ => {
+                                    let tmp = format!("__arg_{}", tmp_counter);
+                                    tmp_counter += 1;
+                                    out.push_str(&format!(
+                                        "    {} = {}\n",
+                                        tmp, emit_expr_py(input)
+                                    ));
+                                    tmp
+                                }
                             };
                             bullang::ast::Param {
                                 name: param_name,
